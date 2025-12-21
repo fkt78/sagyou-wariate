@@ -1,18 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-// Firebase SDKの各モジュールをインポートします。
-// これらはFirebaseの各機能（初期化、データベース、認証）を利用するために必要です。
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, setDoc, onSnapshot, updateDoc, collection, getDocs, writeBatch, getDoc, deleteDoc } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
-
-// UI表示で使用するアイコンライブラリ(lucide-react)と、グラフ描画ライブラリ(recharts)をインポートします。
-// 【追加】RotateCcw アイコンを追加
+import { getAuth, signInAnonymously, onAuthStateChanged, signOut, signInWithCustomToken } from 'firebase/auth';
 import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Trash2, LogIn, AlertTriangle, Layers, Save, LayoutDashboard, ArrowLeft, TrendingUp, Loader, Image as ImageIcon, ChevronDown, ChevronRight, Folder, RefreshCw, Check, Download, Upload, Sheet, Sparkles, Send, RotateCcw } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
 
 // --- Firebase設定 ---
-// Firebaseプロジェクトに接続するための設定情報です。
-// これらのキーはFirebaseコンソールから取得できます。
+// アップロードされたファイルの設定値を適用しています
 const firebaseConfig = {
     apiKey: "AIzaSyAvxKaj49CfK9T5-h4AycKcguU2gsSXTxc",
     authDomain: "new-check-137f9.firebaseapp.com",
@@ -23,14 +17,15 @@ const firebaseConfig = {
     measurementId: "G-QN9H01RKQV"
 };
 
+// Canvas環境での安定動作のため、Firebase初期化はコンポーネント外で行います
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
 // --- 再利用可能なUIコンポーネント ---
 
 /**
  * アラートモーダルコンポーネント
- * ユーザーにメッセージを通知するためのシンプルなモーダルウィンドウです。
- * @param {object} props - コンポーネントのプロパティ
- * @param {string} props.message - 表示するメッセージ
- * @param {function} props.onClose - モーダルを閉じるための関数
  */
 const AlertModal = ({ message, onClose }) => (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
@@ -45,9 +40,6 @@ const AlertModal = ({ message, onClose }) => (
 
 /**
  * ローディングスピナーコンポーネント
- * データの読み込み中など、非同期処理の待機中に表示します。
- * @param {object} props - コンポーネントのプロパティ
- * @param {string} [props.message="データを読み込んでいます..."] - スピナーと一緒に表示するメッセージ
  */
 const LoadingSpinner = ({ message = "データを読み込んでいます..." }) => (
     <div className="fixed inset-0 bg-gray-900 bg-opacity-80 flex justify-center items-center z-50">
@@ -63,40 +55,35 @@ const LoadingSpinner = ({ message = "データを読み込んでいます..." })
 
 /**
  * ログイン画面コンポーネント
- * ユーザーが店舗と担当者を選択してログインします。
- * @param {object} props - コンポーネントのプロパティ
- * @param {function} props.onLogin - ログイン処理を実行する関数
- * @param {object} props.masterData - 店舗とスタッフのマスターデータ
  */
 const LoginScreen = ({ onLogin, masterData }) => {
     const { stores, staff } = masterData;
     const [storeId, setStoreId] = useState('');
     const [staffName, setStaffName] = useState('');
     const [alertMessage, setAlertMessage] = useState('');
+    const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-    // 店舗データが読み込まれたら、デフォルトの店舗IDを設定します。
     useEffect(() => {
         if (stores.length > 0 && !storeId) {
             setStoreId(stores[0].id);
         }
     }, [stores, storeId]);
 
-    // 店舗が変更されたら、スタッフの選択をリセットします。
     useEffect(() => {
         setStaffName('');
     }, [storeId]);
 
-    // ログインフォームの送信処理
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         if (!staffName) {
             setAlertMessage("担当者を選択してください。");
             return;
         }
-        onLogin(storeId, staffName);
+        setIsLoggingIn(true);
+        await onLogin(storeId, staffName);
+        setIsLoggingIn(false);
     };
     
-    // 表示用のスタッフリスト
     const allStaffList = staff || [];
 
     return (
@@ -112,7 +99,7 @@ const LoginScreen = ({ onLogin, masterData }) => {
                                 <select id="store-select" value={storeId} onChange={(e) => setStoreId(e.target.value)} className="block appearance-none w-full bg-gray-700 border border-gray-600 text-white py-3 px-4 pr-8 rounded-lg leading-tight focus:outline-none focus:bg-gray-600 focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500">
                                     {stores.map(store => <option key={store.id} value={store.id}>{store.name}</option>)}
                                 </select>
-                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400"><svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg></div>
+                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400"><ChevronDown size={16} /></div>
                             </div>
                         </div>
                         <div className="mb-6">
@@ -122,12 +109,13 @@ const LoginScreen = ({ onLogin, masterData }) => {
                                     <option value="" disabled>担当者を選択...</option>
                                     {allStaffList.map(name => <option key={name} value={name}>{name}</option>)}
                                 </select>
-                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400"><svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg></div>
+                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400"><ChevronDown size={16} /></div>
                             </div>
                         </div>
                         <div className="flex items-center justify-center">
-                            <button type="submit" className="flex items-center justify-center gap-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:shadow-outline w-full transition-all duration-300">
-                                <LogIn size={20} /> ログイン
+                            <button type="submit" disabled={isLoggingIn} className="flex items-center justify-center gap-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 px-6 rounded-lg focus:outline-none focus:shadow-outline w-full transition-all duration-300 disabled:opacity-50 disabled:cursor-wait">
+                                {isLoggingIn ? <Loader className="animate-spin" size={20} /> : <LogIn size={20} />}
+                                {isLoggingIn ? 'ログイン中...' : 'ログイン'}
                             </button>
                         </div>
                     </form>
@@ -140,12 +128,6 @@ const LoginScreen = ({ onLogin, masterData }) => {
 
 /**
  * メニュー画面コンポーネント
- * ログイン後に表示され、「作業割り当て」と「ダッシュボード」へのナビゲーションを提供します。
- * @param {object} props - コンポーネントのプロパティ
- * @param {object} props.currentUser - 現在ログイン中のユーザー情報
- * @param {function} props.onNavigate - 画面遷移を実行する関数
- * @param {function} props.onLogout - ログアウト処理を実行する関数
- * @param {object} props.masterData - 店舗マスターデータ
  */
 const MenuScreen = ({ currentUser, onNavigate, onLogout, masterData }) => (
     <div className="bg-gray-900 text-white min-h-screen flex flex-col items-center justify-center p-4">
@@ -171,18 +153,11 @@ const MenuScreen = ({ currentUser, onNavigate, onLogout, masterData }) => (
 
 /**
  * ヒートマップ詳細モーダル
- * ヒートマップのセルをクリックした際に、その時間帯の作業詳細を表示します。
- * @param {object} props - コンポーネントのプロパティ
- * @param {object} props.modalData - モーダルに表示するデータ (hour, laneId, storeId, startDate, endDate)
- * @param {function} props.onClose - モーダルを閉じる関数
- * @param {object} props.allAssignments - 全ての割り当てデータ
- * @param {Array} props.lanes - レジ情報配列
  */
 const HeatmapDetailModal = ({ modalData, onClose, allAssignments, lanes }) => {
     if (!modalData) return null;
     const { hour, laneId, storeId, startDate, endDate } = modalData;
     
-    // 選択された期間内で、指定された条件に合致する作業が存在する日付のリストを計算します。
     const availableDates = useMemo(() => {
         const dates = new Set();
         if (!allAssignments) return [];
@@ -202,7 +177,6 @@ const HeatmapDetailModal = ({ modalData, onClose, allAssignments, lanes }) => {
 
     const [selectedDate, setSelectedDate] = useState('');
 
-    // 利用可能な日付リストが更新されたら、選択中の日付を初期化します。
     useEffect(() => {
         if (availableDates.length > 0) {
             setSelectedDate(availableDates[0]);
@@ -211,7 +185,6 @@ const HeatmapDetailModal = ({ modalData, onClose, allAssignments, lanes }) => {
         }
     }, [availableDates]);
 
-    // 選択された日付に基づいて、表示するタスクのリストをフィルタリングします。
     const tasksForSelectedDate = useMemo(() => {
         if (!selectedDate || !allAssignments || !allAssignments[selectedDate]) return [];
         return allAssignments[selectedDate].filter(task => 
@@ -259,17 +232,15 @@ const HeatmapDetailModal = ({ modalData, onClose, allAssignments, lanes }) => {
     );
 };
 
-// 【追加】個人別パフォーマンスタスク詳細モーダル
+// 個人別パフォーマンスタスク詳細モーダル
 const TaskDetailModal = ({ isOpen, onClose, modalData, allAssignments, filteredData, detailStore }) => {
     if (!isOpen) return null;
     
     const { worker, taskName, taskId } = modalData;
 
-    // クリックされた棒グラフ（担当者＋タスク）に該当する、期間内の全タスクを計算
     const tasksForWorker = useMemo(() => {
         if (!filteredData || !worker || !taskId) return [];
 
-        // 期間・店舗でフィルタリング済みのデータから、該当タスクを抽出
         const relevantTasks = filteredData.filter(task => 
             task.storeId === detailStore && 
             task.taskId === taskId && 
@@ -277,19 +248,16 @@ const TaskDetailModal = ({ isOpen, onClose, modalData, allAssignments, filteredD
             task.duration 
         );
 
-        // 抽出したタスクに日付情報を付与
         const tasksWithDate = relevantTasks.map(task => {
-            // allAssignments（日付でグループ化されている）からタスクIDを元に日付を検索
             const dateEntry = Object.entries(allAssignments).find(([date, tasksOnDate]) => 
                 tasksOnDate.some(t => t.id === task.id)
             );
             return {
                 ...task,
-                date: dateEntry ? dateEntry[0] : '不明な日付' // 日付が見つかればセット
+                date: dateEntry ? dateEntry[0] : '不明な日付'
             };
         });
         
-        // 日付順にソート
         return tasksWithDate.sort((a, b) => a.date.localeCompare(b.date));
 
     }, [isOpen, filteredData, worker, taskId, detailStore, allAssignments]);
@@ -335,26 +303,17 @@ const TaskDetailModal = ({ isOpen, onClose, modalData, allAssignments, filteredD
 
 /**
  * AI分析チャットコンポーネント
- * @param {object} props
- * @param {Array} props.chatHistory - チャットの履歴
- * @param {string} props.userInput - ユーザーの入力テキスト
- * @param {function} props.setUserInput - ユーザー入力を更新する関数
- * @param {function} props.onSendMessage - メッセージを送信する関数
- * @param {boolean} props.isLoading - AIが応答中かどうかのフラグ
- * @param {object} props.error - エラーオブジェクト
  */
 const AIAnalysisChat = ({ chatHistory, userInput, setUserInput, onSendMessage, isLoading, error }) => {
     const chatContainerRef = useRef(null);
     const textareaRef = useRef(null);
     
-    // チャット履歴が更新されたら、一番下までスクロールする
     useEffect(() => {
         if (chatContainerRef.current) {
             chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
         }
     }, [chatHistory, isLoading]);
 
-    // Markdownを解釈してReact要素に変換するヘルパー関数
     const renderMarkdown = (text) => {
         if (!text) return null;
         return text.split('\n').map((line, index) => {
@@ -386,7 +345,6 @@ const AIAnalysisChat = ({ chatHistory, userInput, setUserInput, onSendMessage, i
         });
     };
 
-    // テキストエリアでのキー入力ハンドラ (Enterで送信、Shift+Enterで改行)
     const handleKeyDown = (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -394,7 +352,6 @@ const AIAnalysisChat = ({ chatHistory, userInput, setUserInput, onSendMessage, i
         }
     };
     
-    // テキストエリアの高さ自動調整
     useEffect(() => {
         if (textareaRef.current) {
             textareaRef.current.style.height = 'auto';
@@ -455,47 +412,34 @@ const AIAnalysisChat = ({ chatHistory, userInput, setUserInput, onSendMessage, i
 
 /**
  * ダッシュボード画面コンポーネント
- * 作業データを様々な角度から可視化し、分析情報を提供します。
- * @param {object} props - コンポーネントのプロパティ
- * @param {object} props.allAssignments - 全ての割り当てデータ
- * @param {object} props.hourlyMetrics - 全ての客数・売上データ
- * @param {object} props.currentUser - 現在ログイン中のユーザー情報
- * @param {object} props.masterData - 各種マスターデータ
- * @param {Array} props.lanes - レジ情報配列
  */
 const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterData, lanes }) => {
     const { stores, workItems, staff } = masterData;
-    // 日付範囲の初期値を設定（今日から一週間前）
     const today = new Date();
     const weekAgo = new Date(today);
     weekAgo.setDate(today.getDate() - 6);
     
-    // State管理
     const [startDate, setStartDate] = useState(weekAgo.toISOString().slice(0, 10));
     const [endDate, setEndDate] = useState(today.toISOString().slice(0, 10));
-    const [comparisonStores, setComparisonStores] = useState(stores.map(s => s.id)); // 比較対象店舗
-    const [heatmapStore, setHeatmapStore] = useState(currentUser.storeId); // ヒートマップ表示店舗
-    const [detailStore, setDetailStore] = useState(currentUser.storeId); // 詳細分析表示店舗
-    const [taskComparisonStore, setTaskComparisonStore] = useState(currentUser.storeId); // タスク比較表示店舗
-    const [heatmapModal, setHeatmapModal] = useState({ isOpen: false, data: null }); // ヒートマップ詳細モーダル
-    // 【追加】タスク詳細モーダルのState
+    const [comparisonStores, setComparisonStores] = useState(stores.map(s => s.id));
+    const [heatmapStore, setHeatmapStore] = useState(currentUser.storeId);
+    const [detailStore, setDetailStore] = useState(currentUser.storeId);
+    const [taskComparisonStore, setTaskComparisonStore] = useState(currentUser.storeId);
+    const [heatmapModal, setHeatmapModal] = useState({ isOpen: false, data: null });
     const [taskDetailModal, setTaskDetailModal] = useState({ isOpen: false, worker: null, taskName: null, taskId: null });
     
-    // AIチャット用State
     const [chatHistory, setChatHistory] = useState([]);
     const [userInput, setUserInput] = useState('');
     const [isAiLoading, setIsAiLoading] = useState(false);
     const [aiError, setAiError] = useState(null);
-    const analysisDataRef = useRef(null); // 分析用データを保持
+    const analysisDataRef = useRef(null);
     
-     // グラフの表示データを切り替えるためのState
     const initialVisibility = useMemo(() => stores.reduce((acc, store) => {
         acc[store.id] = { customers: true, sales: true, workload: true };
         return acc;
     }, {}), [stores]);
     const [visibleData, setVisibleData] = useState(initialVisibility);
 
-    // 表示データ切り替えハンドラ
     const handleVisibilityToggle = (storeId, metric) => {
         setVisibleData(prev => ({
             ...prev,
@@ -506,7 +450,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         }));
     };
     
-    // 作業項目から作業カテゴリの一覧を生成
     const workTypes = useMemo(() => {
         const allTypes = new Set();
         workItems.forEach(item => {
@@ -517,12 +460,10 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         return ['すべて', ...Array.from(allTypes).sort()];
     }, [workItems]);
 
-    // 分析用State
     const [selectedAnalysisTask, setSelectedAnalysisTask] = useState('');
     const [selectedWorkType, setSelectedWorkType] = useState('');
     const [comparisonCategory, setComparisonCategory] = useState('すべて');
     
-    // 初期値設定Effect
     useEffect(() => {
         if (workItems.length > 0 && !selectedAnalysisTask) {
             setSelectedAnalysisTask(workItems[0].id);
@@ -539,12 +480,10 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         setComparisonStores(stores.map(s => s.id));
     }, [stores]);
 
-    // 比較対象店舗のチェックボックス切り替えハンドラ
     const handleComparisonStoreToggle = (storeId) => {
         setComparisonStores(prev => prev.includes(storeId) ? prev.filter(id => id !== storeId) : [...prev, storeId]);
     };
     
-    // 選択された日付範囲と店舗でフィルタリングされた生データを計算
     const filteredData = useMemo(() => 
         Object.entries(allAssignments || {})
             .filter(([date]) => date >= startDate && date <= endDate)
@@ -554,7 +493,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
 
     const timeLine = useMemo(() => Array.from({ length: 24 }, (_, i) => i), []);
 
-    // 作業負荷に応じてヒートマップのセルの色を決定する関数
     const getWorkloadColor = (duration) => {
         if (duration <= 0) return 'bg-gray-800/50';
         if (duration <= 5) return 'bg-green-900/80';
@@ -572,7 +510,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         return 'bg-red-700/80';
     };
     
-    // グラフで使用する店舗ごとの色を定義
     const STORE_COLORS = useMemo(() => {
         const colors = ['#06b6d4', '#8b5cf6', '#ec4899', '#f97316', '#10b981'];
         return stores.reduce((acc, store, index) => {
@@ -581,7 +518,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         }, {});
     }, [stores]);
 
-    // ヒートマップ用のデータを計算（期間中の1日あたりの平均作業時間、客数、売上）
     const heatmapData = useMemo(() => {
         const start = new Date(startDate);
         const end = new Date(endDate);
@@ -597,7 +533,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
             };
         }
 
-        // 割り当てから合計作業時間を計算
         filteredData
             .filter(t => t.storeId === heatmapStore)
             .forEach(task => {
@@ -608,7 +543,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                 }
             });
         
-        // メトリクスから合計客数・売上を計算
         if (hourlyMetrics) {
              for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
                 const dateString = d.toISOString().slice(0, 10);
@@ -639,7 +573,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         return averages;
     }, [startDate, endDate, filteredData, hourlyMetrics, heatmapStore, lanes]);
 
-    // ヒートマップのセルクリック時のハンドラ
     const handleHeatmapClick = (hour, laneId) => {
         setHeatmapModal({ 
             isOpen: true, 
@@ -647,7 +580,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         });
     };
     
-    // 店舗別パフォーマンスグラフ用のデータを計算
     const performanceData = useMemo(() => {
         const start = new Date(startDate);
         const end = new Date(endDate);
@@ -705,7 +637,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         return chartData;
     }, [startDate, endDate, hourlyMetrics, allAssignments, stores]);
 
-    // 担当者別作業時間（円グラフ）用のデータを計算
     const timeByWorker = useMemo(() => {
         const workerData = filteredData.filter(t => t.storeId === detailStore).reduce((acc, task) => {
             if (!task.worker) return acc;
@@ -718,7 +649,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         return Object.entries(workerData).map(([name, value]) => ({ name, value }));
     }, [filteredData, detailStore]);
 
-    // 特定の作業における個人別パフォーマンスデータを計算
     const individualTaskPerformance = useMemo(() => {
         const tasksForAnalysis = filteredData.filter(task => task.storeId === detailStore && task.taskId === selectedAnalysisTask && task.worker);
         let overallTotalDuration = 0;
@@ -739,7 +669,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         return { individualData, overallAverage };
     }, [filteredData, detailStore, selectedAnalysisTask]);
     
-    // 季節変動トレンド（折れ線グラフ）用のデータを計算
     const seasonalTaskTrend = useMemo(() => {
         if (!selectedWorkType) return [];
         const monthlyData = Object.entries(allAssignments || {}).filter(([date, tasks]) => tasks.some(t => comparisonStores.includes(t.storeId))).reduce((acc, [date, tasks]) => {
@@ -760,7 +689,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         return Object.values(monthlyData).sort((a, b) => a.month.localeCompare(b.month));
     }, [allAssignments, selectedWorkType, comparisonStores, stores]);
     
-    // タスク別平均作業時間（棒グラフ）用のデータを計算
     const timeByTaskComparison = useMemo(() => {
         const categoryFilteredData = comparisonCategory === 'すべて'
             ? filteredData
@@ -824,7 +752,7 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
             const workerAverages = Object.entries(workers).map(([worker, data]) => ({ worker, avg: Math.round(data.total / data.count) }));
             return { taskName, workerAverages };
         });
-        analysisDataRef.current = analysisData; // refに保存
+        analysisDataRef.current = analysisData;
         return `分析期間: ${analysisData.period.start} ~ ${analysisData.period.end}\n分析対象店舗: ${analysisData.stores.join(', ')}\n\n時間帯別平均データ:\n${analysisData.hourlyData.map(h => `- ${h.hour}:\n${analysisData.stores.map(s => `  - ${s}: 客数 ${h[s+'_customers']}人, 売上 ${h[s+'_sales']}円, 作業時間 ${h[s+'_workload']}分`).join('\n')}`).join('')}\n\nタスク別平均作業時間:\n${analysisData.taskData.map(t => `- ${t.name}: 全店舗平均 ${t.overallAvg}分, ${taskComparisonStore && stores.find(s=>s.id === taskComparisonStore)?.name}平均 ${t.storeAvg}分`).join('\n')}\n\n担当者別タスク平均作業時間:\n${analysisData.individualData.map(t => `- ${t.taskName}:\n${t.workerAverages.map(w => `  - ${w.worker}: ${w.avg}分`).join('\n')}`).join('')}`;
     };
 
@@ -838,7 +766,7 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
             const userQuery = `以下の店舗運営データを分析し、改善提案レポートを作成してください。\n\n${dataSummary}`;
             
             const apiKey = "";
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
             const payload = { contents: [{ parts: [{ text: userQuery }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
 
             const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -880,7 +808,7 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
             }));
 
             const apiKey = "";
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
             const payload = { contents: conversationHistory, systemInstruction: { parts: [{ text: systemPrompt }] } };
 
             const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -900,7 +828,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         }
     };
     
-    // データがまだ読み込まれていない場合はローディング画面を表示
     if (!allAssignments) {
         return <LoadingSpinner message="分析データを準備しています..." />;
     }
@@ -912,7 +839,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
     return (
         <>
             {heatmapModal.isOpen && <HeatmapDetailModal modalData={heatmapModal.data} allAssignments={allAssignments} onClose={() => setHeatmapModal({ isOpen: false, data: null })} lanes={lanes} />}
-            {/* 【追加】タスク詳細モーダルをレンダリング */}
             <TaskDetailModal 
                 isOpen={taskDetailModal.isOpen}
                 onClose={() => setTaskDetailModal({ isOpen: false, worker: null, taskName: null, taskId: null })}
@@ -922,7 +848,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                 detailStore={detailStore}
             />
             <div className="p-4 space-y-6">
-                {/* フィルター設定 */}
                 <div className="bg-gray-800 p-4 rounded-lg space-y-4">
                     <div><h3 className="text-lg font-bold text-cyan-400 mb-2">フィルター設定</h3></div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -945,7 +870,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                         </div>
                     </div>
                 </div>
-                {/* ヒートマップ */}
                 <div className="bg-gray-800 p-6 rounded-lg">
                     <div className="flex items-center gap-4 mb-4">
                         <h3 className="text-lg font-bold text-cyan-400">時間帯・指標別 状況ヒートマップ（期間平均）</h3>
@@ -956,7 +880,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                         </div>
                     </div>
                     <div className="grid gap-2 overflow-x-auto pb-4" style={{gridTemplateColumns: `minmax(130px, auto) minmax(150px, auto) repeat(${lanes.length}, minmax(120px, 1fr))`}}>
-                        {/* Column: Customers */}
                         <div>
                             <h4 className="text-center font-bold mb-2">客数</h4>
                             <div className="space-y-1">
@@ -968,7 +891,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                                 ))}
                             </div>
                         </div>
-                        {/* Column: Sales */}
                         <div>
                             <h4 className="text-center font-bold mb-2">販売金額</h4>
                             <div className="space-y-1">
@@ -980,7 +902,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                                 ))}
                             </div>
                         </div>
-                        {/* Columns: Lanes */}
                         {lanes.map(lane => (
                             <div key={lane.id}>
                                 <h4 className="text-center font-bold mb-2">{lane.name}</h4>
@@ -996,7 +917,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                         ))}
                     </div>
                 </div>
-                {/* 店舗別 時間帯パフォーマンス分析 */}
                 <div className="bg-gray-800 p-6 rounded-lg">
                     <h3 className="text-lg font-bold text-cyan-400 mb-4">店舗別 時間帯パフォーマンス分析</h3>
                     <div className="flex flex-wrap gap-x-6 gap-y-3 mb-6 p-3 bg-gray-900/50 rounded-lg">
@@ -1044,7 +964,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                         </ComposedChart>
                     </ResponsiveContainer>
                 </div>
-                {/* AI分析セクション */}
                 <div className="space-y-4">
                     <div className="flex justify-center">
                         <button onClick={handleInitialAnalysis} disabled={isAiLoading} className="bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-white font-bold py-3 px-8 rounded-lg flex items-center gap-3 transition-all duration-300 shadow-lg disabled:opacity-50 disabled:cursor-wait">
@@ -1061,7 +980,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                         error={aiError}
                     />
                 </div>
-                {/* 季節変動トレンドグラフ */}
                 <div className="bg-gray-800 p-6 rounded-lg">
                     <div className="flex flex-wrap gap-4 items-center mb-4">
                         <h3 className="text-lg font-bold text-cyan-400 flex items-center gap-2"><TrendingUp size={24}/>季節変動トレンド</h3>
@@ -1082,7 +1000,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                         </LineChart>
                     </ResponsiveContainer>
                 </div>
-                {/* 詳細分析セクション */}
                 <div className="bg-gray-800 p-6 rounded-lg">
                     <div className="flex flex-wrap gap-4 items-center mb-4">
                         <h3 className="text-lg font-bold text-cyan-400">詳細分析</h3>
@@ -1091,7 +1008,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                         </select>
                     </div>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* 担当者別作業時間 */}
                         <div>
                             <h4 className="text-center font-bold mb-4">担当者別 作業時間</h4>
                             <ResponsiveContainer width="100%" height={300}>
@@ -1104,7 +1020,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                                 </PieChart>
                             </ResponsiveContainer>
                         </div>
-                        {/* 作業別・個人別パフォーマンス */}
                         <div>
                             <h4 className="text-center font-bold mb-4">作業別・個人別 パフォーマンス</h4>
                             <select value={selectedAnalysisTask} onChange={e => setSelectedAnalysisTask(e.target.value)} className="w-full bg-gray-700 text-white rounded-md p-2 text-sm focus:ring-2 focus:ring-cyan-500 focus:outline-none mb-2">
@@ -1116,7 +1031,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                                     <YAxis type="category" dataKey="name" stroke="#9ca3af" fontSize={12} width={60} />
                                     <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: 'none' }} itemStyle={{ color: '#e5e7eb' }} cursor={{fill: 'rgba(107, 114, 128, 0.2)'}} />
                                     <Legend wrapperStyle={{top: 0, color: '#e5e7eb' }} />
-                                    {/* 【変更】BarにonClickハンドラとcursorスタイルを追加 */}
                                     <Bar 
                                         dataKey="avgTime" 
                                         fill={STORE_COLORS[detailStore]} 
@@ -1124,9 +1038,9 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                                         onClick={(data) => {
                                             setTaskDetailModal({
                                                 isOpen: true,
-                                                worker: data.name, // クリックされたバーの担当者名
-                                                taskName: workItems.find(item => item.id === selectedAnalysisTask)?.name, // 選択中のタスク名
-                                                taskId: selectedAnalysisTask // 選択中のタスクID
+                                                worker: data.name,
+                                                taskName: workItems.find(item => item.id === selectedAnalysisTask)?.name,
+                                                taskId: selectedAnalysisTask
                                             });
                                         }}
                                         cursor="pointer"
@@ -1141,7 +1055,6 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                         </div>
                     </div>
                 </div>
-                {/* タスク別平均作業時間 */}
                 <div className="bg-gray-800 p-6 rounded-lg">
                     <div className="flex flex-wrap gap-4 items-center mb-4">
                         <h3 className="text-lg font-bold text-cyan-400">タスク別 平均作業時間（比較）</h3>
@@ -1173,18 +1086,12 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
 
 /**
  * 客数・販売金額一括入力モーダル
- * @param {object} props - コンポーネントのプロパティ
- * @param {boolean} props.isOpen - モーダルが開いているかどうか
- * @param {function} props.onClose - モーダルを閉じる関数
- * @param {function} props.onSave - 保存処理を実行する関数
- * @param {object} props.initialData - 初期データ
  */
 const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData }) => {
     const [metricsData, setMetricsData] = useState({});
     const inputRefs = useRef({});
     const saveButtonRef = useRef(null);
 
-    // モーダルが開いたときに初期データでstateを初期化
     useEffect(() => {
         if (isOpen) {
             const fullDayData = {};
@@ -1195,15 +1102,13 @@ const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData }) => {
                 };
             }
             setMetricsData(fullDayData);
-            // モーダルが開いたときに最初の客数入力欄にフォーカス
             setTimeout(() => inputRefs.current['customers-0']?.focus(), 100);
         }
     }, [initialData, isOpen]);
 
     const handleInputChange = (hour, field, value) => {
-        // カンマ区切りの数値を許可し、数値のみをstateに保存
         const parsedValue = value === '' ? '' : parseInt(value.replace(/,/g, ''), 10);
-         if (value !== '' && isNaN(parsedValue)) return; // 数値でない場合は更新しない
+         if (value !== '' && isNaN(parsedValue)) return;
 
         setMetricsData(prev => ({
             ...prev,
@@ -1215,7 +1120,6 @@ const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData }) => {
     };
 
     const handleSaveClick = () => {
-        // 保存時に空のエントリをクリーンアップ
         const cleanedData = {};
         Object.entries(metricsData).forEach(([hour, values]) => {
             const customers = values.customers === '' ? null : Number(values.customers);
@@ -1310,54 +1214,34 @@ const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData }) => {
 
 /**
  * タイムテーブル画面コンポーネント
- * 日々の作業割り当てと、テンプレートの作成・編集を行います。
- * @param {object} props - コンポーネントのプロパティ
- * @param {object} props.db - Firestoreインスタンス
- * @param {object} props.currentUser - 現在ログイン中のユーザー情報
- * @param {object} props.assignments - 割り当てデータ
- * @param {function} props.setAssignments - 割り当てデータを更新する関数
- * @param {object} props.templates - テンプレートデータ
- * @param {function} props.setTemplates - テンプレートデータを更新する関数
- * @param {function} props.onBack - 前の画面に戻る関数
- * @param {object} props.masterData - 各種マスターデータ
- * @param {function} props.onSync - Firestoreとデータを同期する関数
- * @param {boolean} props.isSyncing - 同期処理中かどうかのフラグ
- * @param {string} props.selectedDate - 選択中の日付
- * @param {function} props.setSelectedDate - 選択中の日付を更新する関数
- * @param {function} props.onImportRequest - ファイルインポートを要求する関数
- * @param {Array} props.lanes - レジ情報配列
- * @param {function} props.setLanes - レジ情報を更新する関数
  */
 const TimetableScreen = ({ 
     db, currentUser, assignments, setAssignments, templates, setTemplates, 
-    hourlyMetrics, setHourlyMetrics, // Add props
+    hourlyMetrics, setHourlyMetrics,
     onBack, masterData, onSync, isSyncing, 
     selectedDate, setSelectedDate, onImportRequest,
     lanes, setLanes
 }) => {
-    const [viewMode, setViewMode] = useState('operational'); // 'operational' (通常表示) or 'template' (テンプレート編集)
+    const [viewMode, setViewMode] = useState('operational');
     const [selectedPatternId, setSelectedPatternId] = useState(null);
     const [modalState, setModalState] = useState({ isOpen: false, type: null, data: null });
     const [parsedCsvData, setParsedCsvData] = useState(null);
-    const [now, setNow] = useState(new Date()); // 現在の日時をstateで管理
-    const [isMetricsModalOpen, setIsMetricsModalOpen] = useState(false); // 一括入力モーダルの表示状態
+    const [now, setNow] = useState(new Date());
+    const [isMetricsModalOpen, setIsMetricsModalOpen] = useState(false);
 
-    // 15分ごとに現在日時を更新して、未完了タスクのチェックを再実行する
     useEffect(() => {
         const timer = setInterval(() => {
             setNow(new Date());
-        }, 15 * 60 * 1000); // 15分ごとに更新
-        return () => clearInterval(timer); // コンポー-ネントのアンマウント時にタイマーをクリア
+        }, 15 * 60 * 1000);
+        return () => clearInterval(timer);
     }, []);
     
-    // 【新機能】選択された日付のデータに基づいて、表示するレジの数を動的に調整する
     useEffect(() => {
         const tasksForDate = assignments[selectedDate]?.filter(a => a.storeId === currentUser.storeId) || [];
         
-        let targetLaneCount = 2; // デフォルトは2レジ
+        let targetLaneCount = 2;
 
         if (tasksForDate.length > 0) {
-            // データ内に存在する最大のレジ番号を取得
             const maxLaneNumInData = tasksForDate.reduce((max, task) => {
                 if (task.laneId) {
                     const laneNum = parseInt(task.laneId.replace('lane', ''), 10);
@@ -1366,11 +1250,9 @@ const TimetableScreen = ({
                 return max;
             }, 0);
             
-            // デフォルトの2レジ、またはデータ内の最大レジ数のうち、大きい方を表示数とする
             targetLaneCount = Math.max(2, maxLaneNumInData);
         }
 
-        // 現在の表示レジ数と異なる場合のみ更新
         if (lanes.length !== targetLaneCount) {
             const newLanes = Array.from({ length: targetLaneCount }, (_, i) => ({
                 id: `lane${i + 1}`,
@@ -1378,12 +1260,10 @@ const TimetableScreen = ({
             }));
             setLanes(newLanes);
         }
-    }, [selectedDate, assignments, currentUser.storeId]); // `setLanes`と`lanes.length`は意図的に依存配列から除外し、無限ループを防止
+    }, [selectedDate, assignments, currentUser.storeId]);
     
-    // 現在の店舗のテンプレートデータをメモ化
     const currentStoreTemplates = useMemo(() => templates || {}, [templates]);
     
-    // 表示モードに応じて、タイムテーブルに表示するデータソースを切り替え
     const currentAssignments = useMemo(() => {
         if (viewMode === 'template') {
             return currentStoreTemplates[selectedPatternId]?.assignments || [];
@@ -1391,18 +1271,15 @@ const TimetableScreen = ({
         return assignments[selectedDate]?.filter(a => a.storeId === currentUser.storeId) || [];
     }, [viewMode, assignments, templates, selectedDate, currentUser.storeId, selectedPatternId]);
     
-    // 現在選択されている日付・店舗の客数/売上データをメモ化
     const currentMetrics = useMemo(() => {
         if (viewMode !== 'operational') return {};
         return hourlyMetrics[selectedDate]?.[currentUser.storeId] || {};
     }, [hourlyMetrics, selectedDate, currentUser.storeId, viewMode]);
 
-    // 【新機能】未完了の過去タスク件数を計算
     const overdueTaskCount = useMemo(() => {
         if (viewMode !== 'operational') return 0;
         
         const todayStr = new Date().toISOString().slice(0, 10);
-        // 選択日が今日より前か、今日の場合のみチェック
         if (selectedDate > todayStr) return 0;
 
         return currentAssignments.reduce((count, task) => {
@@ -1419,20 +1296,17 @@ const TimetableScreen = ({
     }, [currentAssignments, selectedDate, now, viewMode]);
 
 
-    // テンプレートが読み込まれたら、選択中のテンプレートIDを初期化
     useEffect(() => {
         const patternIds = Object.keys(currentStoreTemplates);
         if (!selectedPatternId && patternIds.length > 0) {
             setSelectedPatternId(patternIds[0]);
         } else if (patternIds.length > 0 && !patternIds.includes(selectedPatternId)) {
-            // 選択中のIDが存在しなくなった場合（削除後など）
             setSelectedPatternId(patternIds[0]);
         } else if (patternIds.length === 0) {
             setSelectedPatternId(null);
         }
     }, [currentStoreTemplates, selectedPatternId]);
 
-    // タイムテーブルのデータを更新する汎用関数
     const updateCurrentData = (newDataSet) => {
         if (viewMode === 'template') {
             if (!selectedPatternId) return;
@@ -1450,13 +1324,11 @@ const TimetableScreen = ({
         }
     };
     
-    // タスクカード内のデータ（担当者、作業時間）が変更されたときのハンドラ
     const handleDataChange = (assignmentId, field, value) => {
         const newDataSet = currentAssignments.map(a => a.id === assignmentId ? { ...a, [field]: value } : a );
         updateCurrentData(newDataSet);
     };
 
-    // 【追加】担当者と時間をリセットするハンドラ
     const handleResetTaskData = (assignmentId) => {
          const newDataSet = currentAssignments.map(a =>
             a.id === assignmentId ? { ...a, worker: '', duration: '' } : a
@@ -1464,7 +1336,6 @@ const TimetableScreen = ({
         updateCurrentData(newDataSet);
     };
     
-    // 一括入力モーダルからの保存処理
     const handleMetricsBulkSave = (newData) => {
         setHourlyMetrics(prev => ({
             ...prev,
@@ -1473,42 +1344,37 @@ const TimetableScreen = ({
                 [currentUser.storeId]: newData
             }
         }));
-        setIsMetricsModalOpen(false); // モーダルを閉じる
+        setIsMetricsModalOpen(false);
     };
 
-    // タスクを削除するハンドラ
     const handleDeleteTask = (assignmentIdToDelete) => {
         const newAssignments = currentAssignments.filter(a => a.id !== assignmentIdToDelete);
         updateCurrentData(newAssignments);
     };
 
-    // テンプレートを現在のタイムテーブルに適用するハンドラ
     const handleApplyTemplate = (patternId) => {
         const template = templates?.[patternId];
         if (!template) return;
 
-        const dayOfWeek = new Date(selectedDate + 'T00:00:00').getDay(); // 0 (Sunday) to 6 (Saturday)
+        const dayOfWeek = new Date(selectedDate + 'T00:00:00').getDay();
 
         const newDailySchedule = template.assignments
             .map(taskInTemplate => {
                 const workItem = masterData.workItems.find(item => item.id === taskInTemplate.taskId);
-                if (!workItem) return null; // マスターデータにないタスクはスキップ
+                if (!workItem) return null;
                 
-                // 曜日縛りのチェック
                 const taskApplicableDays = workItem.applicableDays;
                 if (Array.isArray(taskApplicableDays) && taskApplicableDays.length > 0 && !taskApplicableDays.includes(dayOfWeek)) {
-                    return null; // 適用曜日でなければスキップ
+                    return null;
                 }
-                // 【変更】テンプレートから適用したタスクにフラグを付ける
                 return { ...taskInTemplate, id: crypto.randomUUID(), storeId: currentUser.storeId, isFromTemplate: true };
             })
-            .filter(Boolean); // nullになった要素を除去
+            .filter(Boolean);
 
         updateCurrentData(newDailySchedule);
         setModalState({ isOpen: false, type: null });
     };
 
-    // 新規パターン作成モーダルの送信ハンドラ
     const handleCreatePatternSubmit = (patternName) => {
         const newPatternId = crypto.randomUUID();
         const newTemplates = {
@@ -1520,7 +1386,6 @@ const TimetableScreen = ({
         setModalState({ isOpen: false, type: null });
     };
     
-    // パターンコピーモーダルの送信ハンドラ
     const handleCopyPatternSubmit = (newPatternName) => {
         if (!selectedPatternId) return;
         const sourcePattern = currentStoreTemplates[selectedPatternId];
@@ -1535,28 +1400,24 @@ const TimetableScreen = ({
         setModalState({ isOpen: false, type: null });
     };
 
-    // パターン削除モーダルの送信ハンドラ
     const handleDeletePatternSubmit = () => {
         if (!selectedPatternId) return;
         const newStoreTemplates = { ...currentStoreTemplates };
         delete newStoreTemplates[selectedPatternId];
         setTemplates(newStoreTemplates);
-        // 削除後、選択肢が残っていれば最初のものを、なければnullを選択状態にする
         const remainingIds = Object.keys(newStoreTemplates);
         setSelectedPatternId(remainingIds.length > 0 ? remainingIds[0] : null);
         setModalState({ isOpen: false, type: null });
     };
     
-    // 「保存して明日に進む」ボタンのハンドラ
     const handleSaveAndProceed = async () => {
-        await onSync(false, true); // エクスポートも実行
+        await onSync(false, true);
         const currentDate = new Date(selectedDate);
         currentDate.setDate(currentDate.getDate() + 1);
         const nextDate = currentDate.toISOString().slice(0, 10);
         setSelectedDate(nextDate);
     };
     
-    // テンプレートをCSV形式でエクスポートするハンドラ
     const handleExportTemplateCSV = () => {
         if (!selectedPatternId || !currentStoreTemplates[selectedPatternId]) {
             alert("エクスポートするテンプレートを選択してください。");
@@ -1573,7 +1434,6 @@ const TimetableScreen = ({
             return;
         }
 
-        // ファイル名用のタイムスタンプ生成
         const now = new Date();
         const year = now.getFullYear();
         const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -1583,7 +1443,6 @@ const TimetableScreen = ({
         const timestamp = `${year}${month}${day}${hours}${minutes}`;
         const saveDate = `${year}-${month}-${day}`;
 
-        // CSVデータの生成
         const headers = ['storeName', 'saveDate', 'templateName', 'hour', 'laneId', 'taskId', 'taskName', 'category', 'worker', 'duration'];
         const csvRows = [headers.join(',')];
 
@@ -1591,7 +1450,7 @@ const TimetableScreen = ({
             const taskData = { storeName, saveDate, templateName, ...task };
             const row = headers.map(header => {
                 let value = taskData[header] === undefined || taskData[header] === null ? '' : String(taskData[header]);
-                if (/[",\n]/.test(value)) { // クォート処理
+                if (/[",\n]/.test(value)) {
                     value = `"${value.replace(/"/g, '""')}"`;
                 }
                 return value;
@@ -1599,9 +1458,8 @@ const TimetableScreen = ({
             csvRows.push(row.join(','));
         });
 
-        // ファイルダウンロード処理
         const csvString = csvRows.join('\n');
-        const blob = new Blob([`\uFEFF${csvString}`], { type: 'text/csv;charset=utf-8;' }); // BOM付きUTF-8
+        const blob = new Blob([`\uFEFF${csvString}`], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
@@ -1612,7 +1470,6 @@ const TimetableScreen = ({
         URL.revokeObjectURL(url);
     };
 
-    // CSVからインポートしたパターンを保存するハンドラ
     const handleImportPatternSubmit = (patternName) => {
         if (!parsedCsvData) return;
         const newPatternId = crypto.randomUUID();
@@ -1626,7 +1483,6 @@ const TimetableScreen = ({
         setModalState({ isOpen: false, type: null });
     };
 
-    // 読み込まれたテンプレートCSVファイルの内容をパースするハンドラ
     const handleTemplateFileRead = (text) => {
         const rows = text.split('\n').filter(row => row.trim() !== '');
         if (rows.length < 2) {
@@ -1664,7 +1520,6 @@ const TimetableScreen = ({
 
     const timeLine = useMemo(() => Array.from({ length: 24 }, (_, i) => i), []);
     
-    // 【変更】レジの追加・削除はセッション中のState変更のみとし、永続化しない
     const addLane = () => {
         if (lanes.length >= 8) {
             alert("これ以上レジは追加できません。");
@@ -1676,19 +1531,17 @@ const TimetableScreen = ({
     };
 
     const removeLane = () => {
-        if (lanes.length <= 2) { // 最低2レジは残す
+        if (lanes.length <= 2) {
             alert("これ以上レジは削除できません。");
             return;
         }
         setLanes(lanes.slice(0, -1));
     };
 
-    // 画面内で使用する様々なモーダルを管理するコンポーネント
     const GenericModal = () => {
         if (!modalState.isOpen) return null;
         const closeModal = () => setModalState({ isOpen: false, type: null, data: null });
 
-        // タスク追加モーダル
         if (modalState.type === 'addTask') {
             const [expandedGroups, setExpandedGroups] = useState({});
             const [selectedTaskIds, setSelectedTaskIds] = useState({});
@@ -1752,7 +1605,7 @@ const TimetableScreen = ({
                     id: crypto.randomUUID(), storeId: currentUser.storeId, hour, laneId,
                     taskId: item.id, taskName: item.name, category: item.associated_types?.[0] || '未分類',
                     worker: '', duration: '',
-                    isFromTemplate: false // 【修正】手動追加タスクにはfalseを明示的に設定
+                    isFromTemplate: false
                 }));
                 
                 updateCurrentData([...currentAssignments, ...newAssignments]);
@@ -1806,7 +1659,6 @@ const TimetableScreen = ({
             );
         }
         
-        // テンプレート適用モーダル
         if (modalState.type === 'applyTemplate') {
             const availableTemplates = Object.entries(currentStoreTemplates);
             return (
@@ -1828,7 +1680,6 @@ const TimetableScreen = ({
             );
         }
         
-        // パターン作成・コピー・インポート名入力モーダル
         if (modalState.type === 'createPattern' || modalState.type === 'copyPattern' || modalState.type === 'importPatternName') {
             const isCopy = modalState.type === 'copyPattern';
             const isImport = modalState.type === 'importPatternName';
@@ -1847,7 +1698,6 @@ const TimetableScreen = ({
             return <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4"><div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-sm"><form onSubmit={handleSubmit} className="p-6"><h3 className="text-lg font-bold text-cyan-400 mb-4">{title}</h3><input type="text" value={name} onChange={e => setName(e.target.value)} className="shadow appearance-none border rounded-lg w-full py-2 px-3 bg-gray-700 border-gray-600 text-white leading-tight focus:outline-none focus:shadow-outline focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500 mb-4" autoFocus/><div className="flex justify-end gap-2"><button type="button" onClick={closeModal} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg">キャンセル</button><button type="submit" className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 px-4 rounded-lg">{buttonText}</button></div></form></div></div>;
         }
 
-        // パターン削除確認モーダル
         if (modalState.type === 'deletePattern') {
             const patternName = currentStoreTemplates[selectedPatternId]?.name || '';
             return (
@@ -1871,12 +1721,12 @@ const TimetableScreen = ({
         <div className="bg-gray-900 text-white min-h-screen font-sans">
             <style>{`
                 @keyframes blink {
-                    0%, 100% { background-color: #374151; } /* gray-700 */
-                    50% { background-color: #ef4444; } /* red-500 */
+                    0%, 100% { background-color: #374151; }
+                    50% { background-color: #ef4444; }
                 }
                 .blinking-task {
                     animation: blink 1.5s infinite;
-                    border: 1px solid #f87171; /* red-400 */
+                    border: 1px solid #f87171;
                 }
                 .overdue-alert-enter {
                     opacity: 0;
@@ -1888,12 +1738,12 @@ const TimetableScreen = ({
                     transition: opacity 300ms, transform 300ms;
                 }
                 @keyframes blink-blue {
-                    0%, 100% { background-color: #374151; } /* gray-700 */
-                    50% { background-color: #1e40af; } /* blue-800 */
+                    0%, 100% { background-color: #374151; }
+                    50% { background-color: #1e40af; }
                 }
                 .blinking-new-task {
                     animation: blink-blue 2s ease-in-out infinite;
-                    border: 1px solid #3b82f6; /* blue-500 */
+                    border: 1px solid #3b82f6;
                 }
             `}</style>
             <GenericModal />
@@ -1905,7 +1755,6 @@ const TimetableScreen = ({
             />
             <div className="max-w-screen-2xl mx-auto p-2 sm:p-4">
                  <header className="mb-6 p-4 bg-gray-800 rounded-lg shadow-lg">
-                    {/* ヘッダー上部 */}
                     <div className="flex justify-between items-start mb-4">
                         <h1 className="text-2xl font-bold text-cyan-400">{viewMode === 'operational' ? '作業割り当て' : 'テンプレート編集'}</h1>
                         <div className="flex items-center gap-4">
@@ -1917,7 +1766,6 @@ const TimetableScreen = ({
                             </div>
                         </div>
                     </div>
-                    {/* 通常表示時のヘッダー */}
                     {viewMode === 'operational' && (
                         <>
                             <div className="flex flex-wrap items-center gap-4">
@@ -1930,7 +1778,6 @@ const TimetableScreen = ({
                                     <button onClick={removeLane} title="レジを削除" className="bg-gray-600 hover:bg-gray-500 text-white p-2 rounded-md text-sm"><Trash2 size={16}/></button>
                                 </div>
                             </div>
-                            {/* 【新機能】未完了タスクの警告表示 */}
                             {overdueTaskCount > 0 && (
                                 <div className="mt-4 p-3 bg-red-900/50 border border-red-500 rounded-lg flex items-center gap-3 overdue-alert-enter-active">
                                     <AlertTriangle className="text-red-400" size={20} />
@@ -1939,7 +1786,6 @@ const TimetableScreen = ({
                             )}
                         </>
                     )}
-                    {/* テンプレート編集時のヘッダー */}
                     {viewMode === 'template' && (
                         <div className="mt-4 p-3 bg-gray-900/50 rounded-lg">
                             <div className="flex flex-wrap items-center gap-2">
@@ -1958,7 +1804,6 @@ const TimetableScreen = ({
                         </div>
                     )}
                 </header>
-                {/* タイムテーブル本体 */}
                 {(currentAssignments.length === 0 && viewMode === 'operational') && <div className="text-center p-8 bg-gray-800 rounded-lg"><p className="text-gray-400 mb-4">この日のスケジュールは空です。</p></div>}
                 {(!selectedPatternId && viewMode === 'template') && <div className="text-center p-8 bg-gray-800 rounded-lg"><p className="text-gray-400">パターンが選択されていません。「新規作成」から新しいパターンを作成してください。</p></div>}
                 
@@ -2011,7 +1856,6 @@ const TimetableScreen = ({
 
                                                         return (
                                                             <div key={assignment.id} className={`bg-gray-700 p-2 rounded-md flex flex-col text-sm relative group ${needsAttention ? 'blinking-task' : ''} ${isAddedTask ? 'blinking-new-task' : ''}`}>
-                                                                {/* 【変更】リセットボタンを追加 */}
                                                                 <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                                                                     <button onClick={() => handleResetTaskData(assignment.id)} title="担当者と時間をリセット" className="text-gray-500 hover:text-yellow-400"><RotateCcw size={14} /></button>
                                                                     <button onClick={() => handleDeleteTask(assignment.id)} title="タスクを削除" className="text-gray-500 hover:text-red-400"><X size={14} /></button>
@@ -2051,7 +1895,6 @@ const TimetableScreen = ({
                         </div>
                     </div>
                 )}
-                {/* フッターアクション */}
                 {viewMode === 'operational' && (
                     <div className="mt-8 flex justify-center">
                         <button onClick={handleSaveAndProceed} className="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-lg flex items-center gap-2 transition-colors duration-300 shadow-lg">
@@ -2067,40 +1910,27 @@ const TimetableScreen = ({
 
 
 // --- App エントリーポイント ---
-// このコンポーネントがアプリケーション全体の親となります。
-// 状態管理、認証、画面遷移のロジックをここに集約しています。
 export default function App() {
-    // --- State管理 ---
-    const [db, setDb] = useState(null); // Firestoreインスタンス
-    const [auth, setAuth] = useState(null); // Firebase Authインスタンス
-    
-    const [currentPage, setCurrentPage] = useState('login'); // 現在表示中のページ
-    const [currentUser, setCurrentUser] = useState(null); // ログイン中のユーザー情報
-    const [assignments, setAssignments] = useState({}); // 日付ごとの作業割り当てデータ
-    const [templates, setTemplates] = useState({}); // 店舗ごとのテンプレートデータ
-    const [hourlyMetrics, setHourlyMetrics] = useState({}); // 時間帯ごとの客数・売上データ
-    const [masterData, setMasterData] = useState({ stores: [], staff: [], workItems: [] }); // マスターデータ
-    // 【変更】レジ情報の永続化を停止。デフォルトは2レジとし、セッション中のみ変更可能とする。
+    const [currentPage, setCurrentPage] = useState('login');
+    const [currentUser, setCurrentUser] = useState(null);
+    const [assignments, setAssignments] = useState({});
+    const [templates, setTemplates] = useState({});
+    const [hourlyMetrics, setHourlyMetrics] = useState({});
+    const [masterData, setMasterData] = useState({ stores: [], staff: [], workItems: [] });
     const [lanes, setLanes] = useState([ { id: 'lane1', name: '1 レジ' }, { id: 'lane2', name: '2 レジ' } ]); 
     
-    // データ読み込み状態フラグ
     const [isAuthReady, setIsAuthReady] = useState(false);
     const [isMasterDataReady, setIsMasterDataReady] = useState(false);
     const [isAssignmentsReady, setIsAssignmentsReady] = useState(false);
     const [isUserDataLoaded, setIsUserDataLoaded] = useState(false);
     
-    const [isSyncing, setIsSyncing] = useState(false); // 同期中フラグ
-    const [showSaveSuccess, setShowSaveSuccess] = useState(false); // 保存成功メッセージ表示フラグ
-    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10)); // 選択中の日付
+    const [isSyncing, setIsSyncing] = useState(false);
+    const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
     
-    // ファイルインポート用
     const fileInputRef = useRef(null);
     const [onFileReadCallback, setOnFileReadCallback] = useState(null);
 
-    /**
-     * Firestoreから全てのマスターデータと割り当てデータを取得します。
-     * @param {object} firestore - Firestoreインスタンス
-     */
     const fetchAllData = async (firestore) => {
         setIsAssignmentsReady(false);
         try {
@@ -2110,22 +1940,18 @@ export default function App() {
             const assignmentsRef = collection(firestore, 'assignments');
             const metricsRef = collection(firestore, 'hourly_metrics');
             
-            // 各コレクションから並行してデータを取得
             const [storesSnapshot, employeesSnapshot, workItemsSnapshot, assignmentsSnapshot, metricsSnapshot] = await Promise.all([
                 getDocs(storesRef), getDocs(employeesRef), getDocs(workItemsRef), getDocs(assignmentsRef), getDocs(metricsRef)
             ]);
 
-            // 店舗データの処理とソート
             const allStores = storesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const allowedStoreNames = ["伊賀平野東町店", "伊賀平野北谷店", "伊賀忍者市駅南店"];
             const storesList = allStores.filter(store => allowedStoreNames.includes(store.name));
             storesList.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
 
-            // 作業項目データの処理とソート
             const workItemsList = workItemsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             workItemsList.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
 
-            // 従業員データの処理とソート
             const employeeDataList = [];
             employeesSnapshot.docs.forEach(doc => {
                 const employee = doc.data();
@@ -2140,30 +1966,26 @@ export default function App() {
             });
             const sortedUniqueStaffNames = [...new Set(employeeDataList.map(emp => emp.displayName))];
             
-            // 割り当てデータの処理
             const allAssignments = {};
             assignmentsSnapshot.forEach(doc => {
                 const docId = doc.id;
                 const idParts = docId.split('_');
                 if (idParts.length < 2) return;
                 
-                const storeId = idParts.slice(0, -1).join('_'); // ストアIDにアンダースコアが含まれる場合に対応
+                const storeId = idParts.slice(0, -1).join('_');
                 const date = idParts[idParts.length - 1];
 
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
 
                 if (!allAssignments[date]) allAssignments[date] = [];
-                 // isFromTemplateがDBに存在すればその値を、なければtrue（旧データ）とする
                 const tasksWithStoreId = (doc.data().tasks || []).map(t => ({
                   ...t,
                   storeId,
-                  // 【修正】DBにisFromTemplateがあればその値、なければtrue(旧データ互換)とする
                   isFromTemplate: t.isFromTemplate !== undefined ? t.isFromTemplate : true
                 }));
                 allAssignments[date].push(...tasksWithStoreId);
             });
 
-            // 客数・売上データの処理
             const allMetrics = {};
             metricsSnapshot.forEach(doc => {
                 const docId = doc.id;
@@ -2191,23 +2013,26 @@ export default function App() {
         }
     };
     
-    // アプリケーション初期化時に一度だけ実行
+    // アプリケーション初期化時に認証フローを実行（Canvas環境向け修正）
     useEffect(() => {
-        const app = initializeApp(firebaseConfig);
-        const firestore = getFirestore(app);
-        const authInstance = getAuth(app);
-        setDb(firestore);
-        setAuth(authInstance);
+        const initAuth = async () => {
+            // ユーザー独自のFirebaseプロジェクトを使用しているため、
+            // Canvas環境のトークン(__initial_auth_token)は使用せず、常に匿名認証を行います。
+            try {
+                await signInAnonymously(auth);
+            } catch (e) {
+                console.error("Anonymous auth failed", e);
+            }
+        };
+        initAuth();
 
-        fetchAllData(firestore).finally(() => setIsMasterDataReady(true));
+        fetchAllData(db).finally(() => setIsMasterDataReady(true));
 
-        // 認証状態の変更を監視
-        const unsubscribeAuth = onAuthStateChanged(authInstance, async (user) => {
+        const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
             setIsUserDataLoaded(false);
             if (user) {
                 try {
-                    // ログイン時: ユーザープロファイル、テンプレートを取得
-                    const userProfileRef = doc(firestore, 'users', user.uid);
+                    const userProfileRef = doc(db, 'users', user.uid);
                     const userProfileSnap = await getDoc(userProfileRef);
 
                     if (userProfileSnap.exists()) {
@@ -2215,12 +2040,10 @@ export default function App() {
                         setCurrentUser({ uid: user.uid, ...userData });
                         setCurrentPage('menu');
 
-                        // テンプレートのみ取得
-                        const templatesDocRef = doc(firestore, 'templates', userData.storeId);
+                        const templatesDocRef = doc(db, 'templates', userData.storeId);
                         const templateSnap = await getDoc(templatesDocRef);
 
                         setTemplates(templateSnap.exists() ? templateSnap.data() : {});
-                        // 【変更】ログイン時にレジ表示をデフォルトの2つにリセット
                         setLanes([ { id: 'lane1', name: '1 レジ' }, { id: 'lane2', name: '2 レジ' } ]);
                     }
                 } catch (error) {
@@ -2229,7 +2052,6 @@ export default function App() {
                      setIsUserDataLoaded(true);
                 }
             } else {
-                // ログアウト時: 状態をリセットしてログイン画面へ
                 setCurrentUser(null);
                 setCurrentPage('login');
                 setIsUserDataLoaded(true);
@@ -2237,15 +2059,12 @@ export default function App() {
             setIsAuthReady(true);
         });
 
-        return () => unsubscribeAuth(); // クリーンアップ
+        return () => unsubscribeAuth();
     }, []);
 
-    /**
-     * 現在の作業割り当てをCSV形式でエクスポートします。
-     */
     const handleExportAssignmentsCSV = () => {
         const assignmentsToExport = assignments[selectedDate]?.filter(a => a.storeId === currentUser.storeId) || [];
-        if (assignmentsToExport.length === 0) return; // データがなければ何もしない
+        if (assignmentsToExport.length === 0) return;
 
         const storeName = masterData.stores.find(s => s.id === currentUser.storeId)?.name || '不明な店舗';
         const now = new Date();
@@ -2275,36 +2094,26 @@ export default function App() {
         URL.revokeObjectURL(url);
     };
 
-    /**
-     * ローカルの変更（作業割り当て、テンプレート）をFirestoreに同期（保存）します。
-     * @param {boolean} [shouldRefetch=false] - 同期後に全データを再取得するかどうか
-     * @param {boolean} [shouldExport=false] - 同期後にCSVをエクスポートするかどうか
-     */
     const handleSync = async (shouldRefetch = false, shouldExport = false) => {
         if (!db || !currentUser || !isUserDataLoaded || !isAssignmentsReady || !isMasterDataReady) return; 
         setIsSyncing(true);
         try {
             const batch = writeBatch(db);
-            // 作業割り当てを保存
             Object.keys(assignments).forEach(date => {
                 const tasksForCurrentUserStore = assignments[date]
                   .filter(t => t.storeId === currentUser.storeId)
-                  // storeIdを除外しつつ、isFromTemplateがfalseの場合のみfalseとして保存
                   .map(({ storeId, ...task }) => {
                     const taskToSave = { ...task };
                     
-                    // 【修正】undefinedを含む可能性のあるフィールドをサニタイズ
                     Object.keys(taskToSave).forEach(key => {
                         if (taskToSave[key] === undefined) {
                             delete taskToSave[key];
                         }
                     });
 
-                    // isFromTemplateのロジックを適用
                     if (taskToSave.isFromTemplate === false) {
                         taskToSave.isFromTemplate = false;
                     } else {
-                        // trueまたはundefinedの場合、フィールド自体を保存しない
                         delete taskToSave.isFromTemplate;
                     }
                     return taskToSave;
@@ -2313,13 +2122,9 @@ export default function App() {
                 const docRef = doc(db, 'assignments', `${currentUser.storeId}_${date}`);
                 batch.set(docRef, { tasks: tasksForCurrentUserStore });
             });
-            // テンプレートを保存
             const templatesDocRef = doc(db, 'templates', currentUser.storeId);
             batch.set(templatesDocRef, templates);
             
-            // 【削除】レジ設定の保存処理を削除
-
-            // 客数・売上データを保存
             Object.entries(hourlyMetrics).forEach(([date, storeData]) => {
                 if (storeData[currentUser.storeId]) {
                     const docRef = doc(db, 'hourly_metrics', `${currentUser.storeId}_${date}`);
@@ -2342,19 +2147,11 @@ export default function App() {
         }
     };
 
-    /**
-     * ファイル選択ダイアログを開き、読み込み後のコールバックを設定します。
-     * @param {function} callback - ファイル読み込み後に実行されるコールバック関数
-     */
     const handleImportRequest = (callback) => {
         setOnFileReadCallback(() => callback);
         fileInputRef.current.click();
     };
 
-    /**
-     * ファイルが選択された際のイベントハンドラ。ファイルを読み込み、コールバックを実行します。
-     * @param {object} event - ファイル選択イベント
-     */
     const handleFileChange = (event) => {
         const file = event.target.files[0];
         if (!file) return;
@@ -2372,13 +2169,9 @@ export default function App() {
             alert('ファイルの読み込み中にエラーが発生しました。');
         };
         reader.readAsText(file, 'utf-8');
-        event.target.value = ''; // 同じファイルを連続で選択できるようにリセット
+        event.target.value = '';
     };
 
-    /**
-     * 作業割り当てCSVファイルを読み込み、アプリケーションの状態に反映させます。
-     * @param {string} text - 読み込まれたCSVファイルの内容
-     */
     const handleAssignmentFileRead = (text) => {
         const rows = text.split('\n').filter(row => row.trim() !== '');
         if (rows.length < 2) return alert("CSVファイルにヘッダー行とデータ行が必要です。");
@@ -2394,7 +2187,6 @@ export default function App() {
             const values = row.trim().split(',');
             const task = {};
             headers.forEach((header, i) => { task[header] = values[i] || ''; });
-            // 【修正】CSVインポートされたタスクにも isFromTemplate: false を設定
             return {...task, hour: parseInt(task.hour, 10), id: crypto.randomUUID(), storeId: currentUser.storeId, isFromTemplate: false};
         }).filter(task => task && !isNaN(task.hour));
         
@@ -2404,41 +2196,55 @@ export default function App() {
         alert(`${csvDate}の作業データとして${newTasks.length}件を読み込みました。`);
     };
 
-    /**
-     * ログイン処理。匿名認証を行い、ユーザープロファイルを作成/更新します。
-     * @param {string} storeId - 選択された店舗ID
-     * @param {string} staffName - 選択された担当者名
-     */
     const handleLogin = async (storeId, staffName) => {
         if (!auth || !db) return;
         try {
-            const userCredential = await signInAnonymously(auth);
-            const user = userCredential.user;
+            // 既に匿名ログイン済みか確認
+            let user = auth.currentUser;
+            if (!user) {
+                // 未ログインならログイン試行
+                const userCredential = await signInAnonymously(auth);
+                user = userCredential.user;
+            }
+
+            // Firestoreにユーザー情報を保存（または更新）
             await setDoc(doc(db, 'users', user.uid), { storeId, staffName });
+
+            // 状態を更新して即座に画面遷移
+            // onAuthStateChangedは認証状態が変わらないと発火しないため、ここで手動セットして画面を切り替える
+            setCurrentUser({ uid: user.uid, storeId, staffName });
+            setCurrentPage('menu');
+
+            // 選択された店舗のテンプレートデータを読み込む
+            try {
+                const templatesDocRef = doc(db, 'templates', storeId);
+                const templateSnap = await getDoc(templatesDocRef);
+                setTemplates(templateSnap.exists() ? templateSnap.data() : {});
+                
+                // レジ設定の初期化
+                setLanes([ { id: 'lane1', name: '1 レジ' }, { id: 'lane2', name: '2 レジ' } ]);
+            } catch (dataError) {
+                console.error("Error fetching user initial data:", dataError);
+            }
+
         } catch (error) {
             console.error("Login Error:", error);
+            // エラー時もコンソールに出すだけにする（アラートだと操作を阻害する場合があるため）
+            console.log("Login failed details:", error);
         }
     };
     
-    /**
-     * ログアウト処理。データを同期してからサインアウトします。
-     */
     const handleLogout = async () => {
         if (!auth) return;
         await handleSync();
         await signOut(auth);
     };
     
-    /**
-     * 画面遷移処理。データを同期してからページを切り替えます。
-     * @param {string} page - 遷移先のページ名
-     */
     const handleNavigate = async (page) => {
         await handleSync();
         setCurrentPage(page);
     };
 
-    // 全ての初期データが読み込まれるまでローディング画面を表示
     if (!isAuthReady || !isMasterDataReady || !isUserDataLoaded || !isAssignmentsReady) {
         return <LoadingSpinner />;
     }
@@ -2446,7 +2252,6 @@ export default function App() {
     return (
         <>
             <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv,text/csv" style={{ display: 'none' }} />
-            {/* 現在のページに応じて表示するコンポーネントを切り替え */}
             {(() => {
                 switch (currentPage) {
                     case 'menu':
@@ -2475,7 +2280,6 @@ export default function App() {
                 }
             })()}
 
-            {/* フローティングアクションボタン */}
             {currentPage === 'timetable' && (
                 <div className="fixed bottom-8 right-8 z-50 flex flex-col gap-3">
                      <button onClick={() => handleImportRequest(handleAssignmentFileRead)} title="作業割り当てCSVインポート" className="bg-sky-600 hover:bg-sky-500 text-white font-bold p-4 rounded-full shadow-lg flex items-center justify-center transition-all duration-300">
