@@ -7,7 +7,7 @@ node_modules/
 coverage/
 
 # Production
-dist/
+# dist/ はFirebase Hostingで使用するため、コミットに含める場合があります
 build/
 
 # Misc
