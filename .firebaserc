@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "new-check-137f9"
+  },
+  "targets": {
+    "new-check-137f9": {
+      "hosting": {
+        "sagyou-wariate": [
+          "sagyou-wariate"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}
