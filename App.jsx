@@ -1927,7 +1927,6 @@ export default function App() {
     const [isSyncing, setIsSyncing] = useState(false);
     const [showSaveSuccess, setShowSaveSuccess] = useState(false);
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
-    
     const fileInputRef = useRef(null);
     const [onFileReadCallback, setOnFileReadCallback] = useState(null);
 
@@ -2098,7 +2097,11 @@ export default function App() {
         if (!db || !currentUser || !isUserDataLoaded || !isAssignmentsReady || !isMasterDataReady) return; 
         setIsSyncing(true);
         try {
-            const batch = writeBatch(db);
+            // Firebaseのバッチ書き込み制限（500操作）を考慮して分割
+            const MAX_BATCH_SIZE = 450; // 安全マージンを取る
+            
+            // assignmentsの準備
+            const assignmentOps = [];
             Object.keys(assignments).forEach(date => {
                 const tasksForCurrentUserStore = assignments[date]
                   .filter(t => t.storeId === currentUser.storeId)
@@ -2120,19 +2123,41 @@ export default function App() {
                   });
                 
                 const docRef = doc(db, 'assignments', `${currentUser.storeId}_${date}`);
-                batch.set(docRef, { tasks: tasksForCurrentUserStore });
+                assignmentOps.push({ docRef, data: { tasks: tasksForCurrentUserStore } });
             });
-            const templatesDocRef = doc(db, 'templates', currentUser.storeId);
-            batch.set(templatesDocRef, templates);
             
+            // hourlyMetricsの準備
+            const metricsOps = [];
             Object.entries(hourlyMetrics).forEach(([date, storeData]) => {
                 if (storeData[currentUser.storeId]) {
                     const docRef = doc(db, 'hourly_metrics', `${currentUser.storeId}_${date}`);
-                    batch.set(docRef, { hourlyData: storeData[currentUser.storeId] });
+                    metricsOps.push({ docRef, data: { hourlyData: storeData[currentUser.storeId] } });
                 }
             });
-
-            await batch.commit();
+            
+            // templatesの準備
+            const templatesDocRef = doc(db, 'templates', currentUser.storeId);
+            const templatesOp = { docRef: templatesDocRef, data: templates };
+            
+            // 全ての操作を結合
+            const allOps = [...assignmentOps, ...metricsOps, templatesOp];
+            
+            // 操作がない場合は早期リターン
+            if (allOps.length === 0) {
+                setShowSaveSuccess(true);
+                setTimeout(() => setShowSaveSuccess(false), 2000);
+                return;
+            }
+            
+            // バッチを分割して実行
+            for (let i = 0; i < allOps.length; i += MAX_BATCH_SIZE) {
+                const batch = writeBatch(db);
+                const ops = allOps.slice(i, i + MAX_BATCH_SIZE);
+                ops.forEach(({ docRef, data }) => {
+                    batch.set(docRef, data);
+                });
+                await batch.commit();
+            }
             
             setShowSaveSuccess(true);
             setTimeout(() => setShowSaveSuccess(false), 2000);
@@ -2142,6 +2167,10 @@ export default function App() {
 
         } catch (error) {
             console.error("Error syncing data with Firestore:", error);
+            // ユーザーにエラーを通知（オプション）
+            if (error.code === 'resource-exhausted') {
+                console.warn("Firestore書き込み制限に達しました。しばらく待ってから再試行してください。");
+            }
         } finally {
             setIsSyncing(false);
         }
@@ -2236,12 +2265,15 @@ export default function App() {
     
     const handleLogout = async () => {
         if (!auth) return;
+        // ログアウト時のみ同期（変更を保存）
         await handleSync();
         await signOut(auth);
     };
     
-    const handleNavigate = async (page) => {
-        await handleSync();
+    const handleNavigate = (page) => {
+        // ページ遷移時は同期しない（即座に遷移）
+        // データは手動保存ボタンで保存される
+        // これにより、ボタンの反応が即座になる
         setCurrentPage(page);
     };
 
