@@ -2014,6 +2014,25 @@ export default function App() {
     
     // アプリケーション初期化時に認証フローを実行（Canvas環境向け修正）
     useEffect(() => {
+        // ページリロードを検知してセッションストレージをクリア
+        // Performance Navigation APIを使用してリロードを検知
+        const navEntries = performance.getEntriesByType('navigation');
+        if (navEntries.length > 0) {
+            const navEntry = navEntries[0];
+            if (navEntry && (navEntry.type === 'reload' || (window.performance.navigation && window.performance.navigation.type === 1))) {
+                // リロード時はセッションストレージをクリアしてログアウト状態にする
+                sessionStorage.removeItem('isLoggedIn');
+            }
+        }
+        
+        // beforeunloadイベントでリロード検知（より確実）
+        const handleBeforeUnload = () => {
+            // リロード時にセッションストレージをクリア
+            sessionStorage.removeItem('isLoggedIn');
+        };
+        
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        
         const initAuth = async () => {
             // ユーザー独自のFirebaseプロジェクトを使用しているため、
             // Canvas環境のトークン(__initial_auth_token)は使用せず、常に匿名認証を行います。
@@ -2029,7 +2048,12 @@ export default function App() {
 
         const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
             setIsUserDataLoaded(false);
-            if (user) {
+            
+            // セッションストレージをチェック（ページリロード時は空になる）
+            const sessionLogin = sessionStorage.getItem('isLoggedIn');
+            
+            if (user && sessionLogin === 'true') {
+                // セッション中でログイン済みの場合のみ、ユーザー情報を復元
                 try {
                     const userProfileRef = doc(db, 'users', user.uid);
                     const userProfileSnap = await getDoc(userProfileRef);
@@ -2044,13 +2068,20 @@ export default function App() {
 
                         setTemplates(templateSnap.exists() ? templateSnap.data() : {});
                         setLanes([ { id: 'lane1', name: '1 レジ' }, { id: 'lane2', name: '2 レジ' } ]);
+                    } else {
+                        // ユーザープロファイルが存在しない場合はログイン画面へ
+                        setCurrentUser(null);
+                        setCurrentPage('login');
                     }
                 } catch (error) {
                     console.error("Error fetching user data:", error);
+                    setCurrentUser(null);
+                    setCurrentPage('login');
                 } finally {
-                     setIsUserDataLoaded(true);
+                    setIsUserDataLoaded(true);
                 }
             } else {
+                // セッションがない、またはログインしていない場合はログイン画面へ
                 setCurrentUser(null);
                 setCurrentPage('login');
                 setIsUserDataLoaded(true);
@@ -2058,7 +2089,10 @@ export default function App() {
             setIsAuthReady(true);
         });
 
-        return () => unsubscribeAuth();
+        return () => {
+            unsubscribeAuth();
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+        };
     }, []);
 
     const handleExportAssignmentsCSV = () => {
@@ -2239,6 +2273,9 @@ export default function App() {
             // Firestoreにユーザー情報を保存（または更新）
             await setDoc(doc(db, 'users', user.uid), { storeId, staffName });
 
+            // セッションストレージにログイン状態を保存（ページリロード時に失われる）
+            sessionStorage.setItem('isLoggedIn', 'true');
+
             // 状態を更新して即座に画面遷移
             // onAuthStateChangedは認証状態が変わらないと発火しないため、ここで手動セットして画面を切り替える
             setCurrentUser({ uid: user.uid, storeId, staffName });
@@ -2267,6 +2304,20 @@ export default function App() {
         if (!auth) return;
         // ログアウト時のみ同期（変更を保存）
         await handleSync();
+        
+        // セッションストレージをクリア
+        sessionStorage.removeItem('isLoggedIn');
+        
+        // ユーザープロファイルを削除して、次回起動時にログイン画面から始まるようにする
+        const user = auth.currentUser;
+        if (user) {
+            try {
+                await deleteDoc(doc(db, 'users', user.uid));
+            } catch (error) {
+                console.error("Error deleting user profile:", error);
+            }
+        }
+        
         await signOut(auth);
     };
     
