@@ -192,7 +192,7 @@ const HeatmapDetailModal = ({ modalData, onClose, allAssignments, lanes }) => {
         );
     }, [selectedDate, allAssignments, storeId, hour, laneId]);
 
-    const laneName = lanes.find(l => l.id === laneId)?.name || 'Unknown Lane';
+    const laneName = (lanes && Array.isArray(lanes) ? lanes : []).find(l => l.id === laneId)?.name || 'Unknown Lane';
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
@@ -249,8 +249,8 @@ const TaskDetailModal = ({ isOpen, onClose, modalData, allAssignments, filteredD
         );
 
         const tasksWithDate = relevantTasks.map(task => {
-            const dateEntry = Object.entries(allAssignments).find(([date, tasksOnDate]) => 
-                tasksOnDate.some(t => t.id === task.id)
+            const dateEntry = Object.entries(allAssignments || {}).find(([date, tasksOnDate]) => 
+                Array.isArray(tasksOnDate) && tasksOnDate.some(t => t.id === task.id)
             );
             return {
                 ...task,
@@ -413,8 +413,8 @@ const AIAnalysisChat = ({ chatHistory, userInput, setUserInput, onSendMessage, i
 /**
  * ダッシュボード画面コンポーネント
  */
-const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterData, lanes }) => {
-    const { stores, workItems, staff } = masterData;
+const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser, masterData = {}, lanes = [] }) => {
+    const { stores = [], workItems = [], staff = [] } = masterData;
     const today = new Date();
     const weekAgo = new Date(today);
     weekAgo.setDate(today.getDate() - 6);
@@ -523,11 +523,12 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         const end = new Date(endDate);
         const dayCount = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
         const numberOfDaysInPeriod = dayCount > 0 ? dayCount : 1;
+        const safeLanes = Array.isArray(lanes) ? lanes : [];
 
         const totals = {};
         for (let i = 0; i < 24; i++) {
             totals[i] = {
-                lanes: lanes.reduce((acc, lane) => ({ ...acc, [lane.id]: 0 }), {}),
+                lanes: safeLanes.reduce((acc, lane) => ({ ...acc, [lane.id]: 0 }), {}),
                 customers: 0,
                 sales: 0
             };
@@ -562,7 +563,7 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         const averages = {};
         for (let hour = 0; hour < 24; hour++) {
             averages[hour] = {
-                lanes: lanes.reduce((acc, lane) => ({
+                lanes: safeLanes.reduce((acc, lane) => ({
                     ...acc,
                     [lane.id]: Math.round((totals[hour].lanes[lane.id] || 0) / numberOfDaysInPeriod)
                 }), {}),
@@ -589,7 +590,7 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         const totals = {};
         for (let i = 0; i < 24; i++) {
             totals[i] = {};
-            stores.forEach(store => {
+            (stores || []).forEach(store => {
                 totals[i][store.id] = { customers: 0, sales: 0, workload: 0 };
             });
         }
@@ -597,7 +598,7 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
             const dateString = d.toISOString().slice(0, 10);
             
-            if (hourlyMetrics[dateString]) {
+            if (hourlyMetrics && hourlyMetrics[dateString]) {
                 stores.forEach(store => {
                     const metricsForStore = hourlyMetrics[dateString][store.id];
                     if (metricsForStore) {
@@ -612,7 +613,7 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
                 });
             }
 
-            if (allAssignments[dateString]) {
+            if (allAssignments && allAssignments[dateString] && Array.isArray(allAssignments[dateString])) {
                 allAssignments[dateString].forEach(task => {
                     const duration = parseInt(task.duration, 10);
                     const taskHour = parseInt(task.hour, 10);
@@ -624,9 +625,10 @@ const DashboardScreen = ({ allAssignments, hourlyMetrics, currentUser, masterDat
         }
 
         const chartData = [];
+        const safeStores = Array.isArray(stores) ? stores : [];
         for (let hour = 0; hour < 24; hour++) {
             const hourData = { hour: `${String(hour).padStart(2, '0')}:00` };
-            stores.forEach(store => {
+            safeStores.forEach(store => {
                 const storeTotals = totals[hour][store.id];
                 hourData[`${store.name}_workload`] = Math.round(storeTotals.workload / numberOfDaysInPeriod);
                 hourData[`${store.name}_customers`] = Math.round(storeTotals.customers / numberOfDaysInPeriod);
@@ -1616,7 +1618,7 @@ const TimetableScreen = ({
                 <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
                     <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
                         <div className="p-4 border-b border-gray-700 flex justify-between items-center">
-                            <h3 className="text-lg font-bold text-cyan-400">タスクを追加 ({modalState.hour}:00 - {lanes.find(l=>l.id===modalState.laneId)?.name})</h3>
+                            <h3 className="text-lg font-bold text-cyan-400">タスクを追加 ({modalState.hour}:00 - {(lanes && Array.isArray(lanes) ? lanes : []).find(l=>l.id===modalState.laneId)?.name})</h3>
                             <button onClick={closeModal} className="text-gray-400 hover:text-white"><X size={24} /></button>
                         </div>
                         <div className="overflow-y-auto p-4 space-y-2 flex-grow">
@@ -1971,10 +1973,15 @@ export default function App() {
                 const idParts = docId.split('_');
                 if (idParts.length < 2) return;
                 
-                const storeId = idParts.slice(0, -1).join('_');
+                const storeIdFromDoc = idParts.slice(0, -1).join('_');
                 const date = idParts[idParts.length - 1];
 
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+
+                // ドキュメントIDが店舗名で保存されている古いデータを、マスタの store.id に正規化（東町店などで storeId 不一致により保存時に空で上書きされる不具合を防止）
+                const storeById = storesList.find(s => s.id === storeIdFromDoc);
+                const storeByName = storesList.find(s => s.name === storeIdFromDoc);
+                const storeId = storeById ? storeIdFromDoc : (storeByName ? storeByName.id : storeIdFromDoc);
 
                 if (!allAssignments[date]) allAssignments[date] = [];
                 const tasksWithStoreId = (doc.data().tasks || []).map(t => ({
@@ -1991,10 +1998,14 @@ export default function App() {
                 const idParts = docId.split('_');
                 if (idParts.length < 2) return;
                 
-                const storeId = idParts.slice(0, -1).join('_');
+                const storeIdFromDoc = idParts.slice(0, -1).join('_');
                 const date = idParts[idParts.length - 1];
 
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+
+                const storeById = storesList.find(s => s.id === storeIdFromDoc);
+                const storeByName = storesList.find(s => s.name === storeIdFromDoc);
+                const storeId = storeById ? storeIdFromDoc : (storeByName ? storeByName.id : storeIdFromDoc);
 
                 if (!allMetrics[date]) {
                     allMetrics[date] = {};
@@ -2133,11 +2144,14 @@ export default function App() {
         try {
             // Firebaseのバッチ書き込み制限（500操作）を考慮して分割
             const MAX_BATCH_SIZE = 450; // 安全マージンを取る
+            const safeAssignments = assignments || {};
             
-            // assignmentsの準備
+            // assignmentsの準備（配列でない日付はスキップしてクラッシュ防止）
             const assignmentOps = [];
-            Object.keys(assignments).forEach(date => {
-                const tasksForCurrentUserStore = assignments[date]
+            Object.keys(safeAssignments).forEach(date => {
+                const dayTasks = safeAssignments[date];
+                if (!Array.isArray(dayTasks)) return;
+                const tasksForCurrentUserStore = dayTasks
                   .filter(t => t.storeId === currentUser.storeId)
                   .map(({ storeId, ...task }) => {
                     const taskToSave = { ...task };
@@ -2157,12 +2171,15 @@ export default function App() {
                   });
                 
                 const docRef = doc(db, 'assignments', `${currentUser.storeId}_${date}`);
-                assignmentOps.push({ docRef, data: { tasks: tasksForCurrentUserStore } });
+                // 空配列で上書きしない（storeId 不一致などでフィルタ結果が空のときに、既存データを消してしまう不具合を防止。東町店のみで起きる現象の対策）
+                if (tasksForCurrentUserStore.length > 0) {
+                    assignmentOps.push({ docRef, data: { tasks: tasksForCurrentUserStore } });
+                }
             });
             
             // hourlyMetricsの準備
             const metricsOps = [];
-            Object.entries(hourlyMetrics).forEach(([date, storeData]) => {
+            Object.entries(hourlyMetrics || {}).forEach(([date, storeData]) => {
                 if (storeData[currentUser.storeId]) {
                     const docRef = doc(db, 'hourly_metrics', `${currentUser.storeId}_${date}`);
                     metricsOps.push({ docRef, data: { hourlyData: storeData[currentUser.storeId] } });
@@ -2171,7 +2188,7 @@ export default function App() {
             
             // templatesの準備
             const templatesDocRef = doc(db, 'templates', currentUser.storeId);
-            const templatesOp = { docRef: templatesDocRef, data: templates };
+            const templatesOp = { docRef: templatesDocRef, data: templates || {} };
             
             // 全ての操作を結合
             const allOps = [...assignmentOps, ...metricsOps, templatesOp];
@@ -2197,7 +2214,9 @@ export default function App() {
             setTimeout(() => setShowSaveSuccess(false), 2000);
             
             if (shouldExport && currentPage === 'timetable') handleExportAssignmentsCSV();
-            if (shouldRefetch) await fetchAllData(db);
+            // 保存直後の refetch は行わない（Firestore の eventual consistency により、
+            // 書き込み反映前に再取得すると古いデータで上書きされ、今日入力したデータが消える不具合の原因になる）
+            // if (shouldRefetch) await fetchAllData(db);
 
         } catch (error) {
             console.error("Error syncing data with Firestore:", error);
