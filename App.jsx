@@ -1932,6 +1932,16 @@ export default function App() {
     const fileInputRef = useRef(null);
     const [onFileReadCallback, setOnFileReadCallback] = useState(null);
 
+    // 保存時に常に最新の assignments を参照するための ref（クロージャが古い state を参照して保存時にデータが消える不具合の対策）
+    // useEffect ではなく setAssignmentsWithRef 呼び出し時に「即座に同期更新」するため、
+    // 保存ボタンが押された瞬間に ref には必ず最新値が入っている
+    const assignmentsLatestRef = useRef({});
+    const setAssignmentsWithRef = (arg) => {
+        const next = typeof arg === 'function' ? arg(assignmentsLatestRef.current) : arg;
+        assignmentsLatestRef.current = next;
+        setAssignments(next);
+    };
+
     const fetchAllData = async (firestore) => {
         setIsAssignmentsReady(false);
         try {
@@ -2013,7 +2023,7 @@ export default function App() {
                 allMetrics[date][storeId] = doc.data().hourlyData || {};
             });
 
-            setAssignments(allAssignments);
+            setAssignmentsWithRef(allAssignments);
             setHourlyMetrics(allMetrics);
             setMasterData({ stores: storesList, staff: sortedUniqueStaffNames, workItems: workItemsList });
         } catch (error) {
@@ -2144,7 +2154,8 @@ export default function App() {
         try {
             // Firebaseのバッチ書き込み制限（500操作）を考慮して分割
             const MAX_BATCH_SIZE = 450; // 安全マージンを取る
-            const safeAssignments = assignments || {};
+            // 常に ref から最新を参照（編集直後に保存した際のクロージャの古い state で上書きされる不具合を防止）
+            const safeAssignments = assignmentsLatestRef.current || {};
             
             // assignmentsの準備（配列でない日付はスキップしてクラッシュ防止）
             const assignmentOps = [];
@@ -2273,7 +2284,7 @@ export default function App() {
         }).filter(task => task && !isNaN(task.hour));
         
         const otherStoresAssignments = assignments[csvDate]?.filter(a => a.storeId !== currentUser.storeId) || [];
-        setAssignments(prev => ({ ...prev, [csvDate]: [...otherStoresAssignments, ...newTasks] }));
+        setAssignmentsWithRef(prev => ({ ...prev, [csvDate]: [...otherStoresAssignments, ...newTasks] }));
         setSelectedDate(csvDate);
         alert(`${csvDate}の作業データとして${newTasks.length}件を読み込みました。`);
     };
@@ -2361,7 +2372,7 @@ export default function App() {
                     case 'timetable':
                         return <TimetableScreen 
                                     db={db} currentUser={currentUser} 
-                                    assignments={assignments} setAssignments={setAssignments} 
+                                    assignments={assignments} setAssignments={setAssignmentsWithRef} 
                                     templates={templates} setTemplates={setTemplates} 
                                     hourlyMetrics={hourlyMetrics} setHourlyMetrics={setHourlyMetrics}
                                     onBack={() => handleNavigate('menu')} 
