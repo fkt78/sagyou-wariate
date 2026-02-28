@@ -6,7 +6,7 @@ import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Tras
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
 
 // --- アプリバージョン ---
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.1';
 const APP_BUILD_DATE = '2026-02-28';
 
 // --- Firebase設定 ---
@@ -1323,11 +1323,16 @@ const TimetableScreen = ({
             };
             setTemplates(updatedTemplates);
         } else {
-            const otherStoresAssignments = assignmentsLatestRef.current[selectedDate]?.filter(a => a.storeId !== currentUser.storeId) || [];
-            setAssignmentsWithRef(prev => ({
-                ...prev,
-                [selectedDate]: [...otherStoresAssignments, ...newDataSet]
-            }));
+            // setAssignments は App 側で setAssignmentsWithRef として渡されているため、
+            // 関数形式で呼ぶと prev には assignmentsLatestRef.current が渡され最新値を参照できる
+            // ※ TimetableScreen のスコープ外にある assignmentsLatestRef を直接参照するのは誤りのため修正
+            setAssignments(prev => {
+                const otherStoresAssignments = prev[selectedDate]?.filter(a => a.storeId !== currentUser.storeId) || [];
+                return {
+                    ...prev,
+                    [selectedDate]: [...otherStoresAssignments, ...newDataSet]
+                };
+            });
         }
     };
     
@@ -1365,7 +1370,7 @@ const TimetableScreen = ({
 
         const dayOfWeek = new Date(selectedDate + 'T00:00:00').getDay();
 
-        const newDailySchedule = template.assignments
+        const newDailySchedule = (template.assignments || [])
             .map(taskInTemplate => {
                 const workItem = masterData.workItems.find(item => item.id === taskInTemplate.taskId);
                 if (!workItem) return null;
@@ -1947,6 +1952,16 @@ export default function App() {
         setAssignments(next);
     };
 
+    // テンプレートも同様に最新値を ref で管理（stale closure & 未ロード時の空上書きを防止）
+    // templatesLoadedRef が true になるのは Firestore から正常に読み込んだ後のみ
+    const templatesLatestRef = useRef({});
+    const templatesLoadedRef = useRef(false);
+    const setTemplatesWithRef = (arg) => {
+        const next = typeof arg === 'function' ? arg(templatesLatestRef.current) : arg;
+        templatesLatestRef.current = next;
+        setTemplates(next);
+    };
+
     const fetchAllData = async (firestore) => {
         setIsAssignmentsReady(false);
         try {
@@ -2092,7 +2107,8 @@ export default function App() {
                         const templatesDocRef = doc(db, 'templates', userData.storeId);
                         const templateSnap = await getDoc(templatesDocRef);
 
-                        setTemplates(templateSnap.exists() ? templateSnap.data() : {});
+                        templatesLoadedRef.current = true;
+                        setTemplatesWithRef(templateSnap.exists() ? templateSnap.data() : {});
                         setLanes([ { id: 'lane1', name: '1 レジ' }, { id: 'lane2', name: '2 レジ' } ]);
                     } else {
                         // ユーザープロファイルが存在しない場合はログイン画面へ
@@ -2203,11 +2219,13 @@ export default function App() {
             });
             
             // templatesの準備
-            const templatesDocRef = doc(db, 'templates', currentUser.storeId);
-            const templatesOp = { docRef: templatesDocRef, data: templates || {} };
-            
-            // 全ての操作を結合
-            const allOps = [...assignmentOps, ...metricsOps, templatesOp];
+            // templatesLoadedRef が true（Firestoreから正常ロード済み）の場合のみ書き込む
+            // 未ロード時に templates = {} で上書きしてデータが消えるのを防ぐ
+            const allOps = [...assignmentOps, ...metricsOps];
+            if (templatesLoadedRef.current) {
+                const templatesDocRef = doc(db, 'templates', currentUser.storeId);
+                allOps.push({ docRef: templatesDocRef, data: templatesLatestRef.current || {} });
+            }
             
             // 操作がない場合は早期リターン
             if (allOps.length === 0) {
@@ -2320,7 +2338,8 @@ export default function App() {
             try {
                 const templatesDocRef = doc(db, 'templates', storeId);
                 const templateSnap = await getDoc(templatesDocRef);
-                setTemplates(templateSnap.exists() ? templateSnap.data() : {});
+                templatesLoadedRef.current = true;
+                setTemplatesWithRef(templateSnap.exists() ? templateSnap.data() : {});
                 
                 // レジ設定の初期化
                 setLanes([ { id: 'lane1', name: '1 レジ' }, { id: 'lane2', name: '2 レジ' } ]);
@@ -2339,6 +2358,10 @@ export default function App() {
         if (!auth) return;
         // ログアウト時のみ同期（変更を保存）
         await handleSync();
+        
+        // ログアウト後は次回ログインまでテンプレートを書き込まないようフラグをリセット
+        templatesLoadedRef.current = false;
+        templatesLatestRef.current = {};
         
         // セッションストレージをクリア
         sessionStorage.removeItem('isLoggedIn');
@@ -2378,7 +2401,7 @@ export default function App() {
                         return <TimetableScreen 
                                     db={db} currentUser={currentUser} 
                                     assignments={assignments} setAssignments={setAssignmentsWithRef} 
-                                    templates={templates} setTemplates={setTemplates} 
+                                    templates={templates} setTemplates={setTemplatesWithRef} 
                                     hourlyMetrics={hourlyMetrics} setHourlyMetrics={setHourlyMetrics}
                                     onBack={() => handleNavigate('menu')} 
                                     masterData={masterData} 
