@@ -5,6 +5,10 @@ import { getAuth, signInAnonymously, onAuthStateChanged, signOut, signInWithCust
 import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Trash2, LogIn, AlertTriangle, Layers, Save, LayoutDashboard, ArrowLeft, TrendingUp, Loader, Image as ImageIcon, ChevronDown, ChevronRight, Folder, RefreshCw, Check, Download, Upload, Sheet, Sparkles, Send, RotateCcw } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
 
+// --- アプリバージョン ---
+const APP_VERSION = '1.1.0';
+const APP_BUILD_DATE = '2026-02-28';
+
 // --- Firebase設定 ---
 // アップロードされたファイルの設定値を適用しています
 const firebaseConfig = {
@@ -119,7 +123,7 @@ const LoginScreen = ({ onLogin, masterData }) => {
                             </button>
                         </div>
                     </form>
-                    <p className="text-center text-gray-500 text-xs mt-4">Project ID: {firebaseConfig.projectId}</p>
+                    <p className="text-center text-gray-500 text-xs mt-4">v{APP_VERSION} ({APP_BUILD_DATE})</p>
                 </div>
             </div>
         </>
@@ -147,6 +151,7 @@ const MenuScreen = ({ currentUser, onNavigate, onLogout, masterData }) => (
                     <span className="text-2xl font-semibold">ダッシュボード</span>
                 </button>
             </div>
+            <p className="text-gray-600 text-xs mt-8">v{APP_VERSION} ({APP_BUILD_DATE})</p>
         </div>
     </div>
 );
@@ -1318,8 +1323,8 @@ const TimetableScreen = ({
             };
             setTemplates(updatedTemplates);
         } else {
-            const otherStoresAssignments = assignments[selectedDate]?.filter(a => a.storeId !== currentUser.storeId) || [];
-            setAssignments(prev => ({
+            const otherStoresAssignments = assignmentsLatestRef.current[selectedDate]?.filter(a => a.storeId !== currentUser.storeId) || [];
+            setAssignmentsWithRef(prev => ({
                 ...prev,
                 [selectedDate]: [...otherStoresAssignments, ...newDataSet]
             }));
@@ -1758,7 +1763,7 @@ const TimetableScreen = ({
             <div className="max-w-screen-2xl mx-auto p-2 sm:p-4">
                  <header className="mb-6 p-4 bg-gray-800 rounded-lg shadow-lg">
                     <div className="flex justify-between items-start mb-4">
-                        <h1 className="text-2xl font-bold text-cyan-400">{viewMode === 'operational' ? '作業割り当て' : 'テンプレート編集'}</h1>
+                        <div><h1 className="text-2xl font-bold text-cyan-400">{viewMode === 'operational' ? '作業割り当て' : 'テンプレート編集'}</h1><span className="text-gray-600 text-xs">v{APP_VERSION}</span></div>
                         <div className="flex items-center gap-4">
                            <button onClick={onBack} className="text-gray-400 hover:text-white flex items-center gap-2 text-sm"><ArrowLeft size={16}/>メニューに戻る</button>
                            <span className="text-sm text-gray-300 flex items-center gap-2"><User size={16}/>{currentUser.staffName}</span>
@@ -2386,7 +2391,7 @@ export default function App() {
                                     setLanes={setLanes}
                                 />;
                     case 'dashboard':
-                        return <div className="bg-gray-900 text-white min-h-screen font-sans"><div className="max-w-screen-2xl mx-auto p-2 sm:p-4"><header className="mb-6 p-4 bg-gray-800 rounded-lg shadow-lg flex justify-between items-center"><h1 className="text-2xl font-bold text-indigo-400">ダッシュボード</h1><div className="flex items-center gap-4"><button onClick={() => handleNavigate('menu')} className="text-gray-400 hover:text-white flex items-center gap-2 text-sm"><ArrowLeft size={16}/>メニューに戻る</button></div></header><DashboardScreen allAssignments={assignments} hourlyMetrics={hourlyMetrics} currentUser={currentUser} masterData={masterData} lanes={lanes} /></div></div>;
+                        return <div className="bg-gray-900 text-white min-h-screen font-sans"><div className="max-w-screen-2xl mx-auto p-2 sm:p-4"><header className="mb-6 p-4 bg-gray-800 rounded-lg shadow-lg flex justify-between items-center"><div><h1 className="text-2xl font-bold text-indigo-400">ダッシュボード</h1><span className="text-gray-600 text-xs">v{APP_VERSION}</span></div><div className="flex items-center gap-4"><button onClick={() => handleNavigate('menu')} className="text-gray-400 hover:text-white flex items-center gap-2 text-sm"><ArrowLeft size={16}/>メニューに戻る</button></div></header><DashboardScreen allAssignments={assignments} hourlyMetrics={hourlyMetrics} currentUser={currentUser} masterData={masterData} lanes={lanes} /></div></div>;
                     case 'login':
                     default:
                         return <LoginScreen onLogin={handleLogin} masterData={masterData} />;
