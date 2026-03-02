@@ -1938,6 +1938,7 @@ export default function App() {
     
     const [isSyncing, setIsSyncing] = useState(false);
     const [showSaveSuccess, setShowSaveSuccess] = useState(false);
+    const [syncError, setSyncError] = useState('');
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
     const fileInputRef = useRef(null);
     const [onFileReadCallback, setOnFileReadCallback] = useState(null);
@@ -1997,6 +1998,15 @@ export default function App() {
             });
             const sortedUniqueStaffNames = [...new Set(employeeDataList.map(emp => emp.displayName))];
             
+            // storeId正規化マップ: 店舗名→正規ID、正規ID→正規ID の双方向マッピング
+            // これにより、ドキュメントIDが店舗名でも正規IDでも一貫して正規IDに変換できる
+            const storeIdMap = new Map();
+            storesList.forEach(store => {
+                storeIdMap.set(store.id, store.id);
+                storeIdMap.set(store.name, store.id);
+            });
+            const normalizeStoreId = (rawId) => storeIdMap.get(rawId) || rawId;
+
             const allAssignments = {};
             assignmentsSnapshot.forEach(doc => {
                 const docId = doc.id;
@@ -2008,10 +2018,7 @@ export default function App() {
 
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
 
-                // ドキュメントIDが店舗名で保存されている古いデータを、マスタの store.id に正規化（東町店などで storeId 不一致により保存時に空で上書きされる不具合を防止）
-                const storeById = storesList.find(s => s.id === storeIdFromDoc);
-                const storeByName = storesList.find(s => s.name === storeIdFromDoc);
-                const storeId = storeById ? storeIdFromDoc : (storeByName ? storeByName.id : storeIdFromDoc);
+                const storeId = normalizeStoreId(storeIdFromDoc);
 
                 if (!allAssignments[date]) allAssignments[date] = [];
                 const tasksWithStoreId = (doc.data().tasks || []).map(t => ({
@@ -2020,6 +2027,16 @@ export default function App() {
                   isFromTemplate: t.isFromTemplate !== undefined ? t.isFromTemplate : true
                 }));
                 allAssignments[date].push(...tasksWithStoreId);
+            });
+
+            // 旧形式（店舗名）と新形式（正規ID）のドキュメントが両方存在する場合の重複排除
+            Object.keys(allAssignments).forEach(date => {
+                const seen = new Set();
+                allAssignments[date] = allAssignments[date].filter(task => {
+                    if (seen.has(task.id)) return false;
+                    seen.add(task.id);
+                    return true;
+                });
             });
 
             const allMetrics = {};
@@ -2033,9 +2050,7 @@ export default function App() {
 
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
 
-                const storeById = storesList.find(s => s.id === storeIdFromDoc);
-                const storeByName = storesList.find(s => s.name === storeIdFromDoc);
-                const storeId = storeById ? storeIdFromDoc : (storeByName ? storeByName.id : storeIdFromDoc);
+                const storeId = normalizeStoreId(storeIdFromDoc);
 
                 if (!allMetrics[date]) {
                     allMetrics[date] = {};
@@ -2179,12 +2194,15 @@ export default function App() {
             const safeAssignments = assignmentsLatestRef.current || {};
             
             // assignmentsの準備（配列でない日付はスキップしてクラッシュ防止）
+            // 店舗名でも正規IDでもマッチできるよう、現在の店舗名も取得しておく
+            const currentStoreName = masterData.stores.find(s => s.id === currentUser.storeId)?.name;
+
             const assignmentOps = [];
             Object.keys(safeAssignments).forEach(date => {
                 const dayTasks = safeAssignments[date];
                 if (!Array.isArray(dayTasks)) return;
                 const tasksForCurrentUserStore = dayTasks
-                  .filter(t => t.storeId === currentUser.storeId)
+                  .filter(t => t.storeId === currentUser.storeId || (currentStoreName && t.storeId === currentStoreName))
                   .map(({ storeId, ...task }) => {
                     const taskToSave = { ...task };
                     
@@ -2209,12 +2227,13 @@ export default function App() {
                 }
             });
             
-            // hourlyMetricsの準備
+            // hourlyMetricsの準備（正規IDまたは店舗名のどちらでもマッチ）
             const metricsOps = [];
             Object.entries(hourlyMetrics || {}).forEach(([date, storeData]) => {
-                if (storeData[currentUser.storeId]) {
+                const metricsData = storeData[currentUser.storeId] || (currentStoreName && storeData[currentStoreName]);
+                if (metricsData) {
                     const docRef = doc(db, 'hourly_metrics', `${currentUser.storeId}_${date}`);
-                    metricsOps.push({ docRef, data: { hourlyData: storeData[currentUser.storeId] } });
+                    metricsOps.push({ docRef, data: { hourlyData: metricsData } });
                 }
             });
             
@@ -2254,10 +2273,10 @@ export default function App() {
 
         } catch (error) {
             console.error("Error syncing data with Firestore:", error);
-            // ユーザーにエラーを通知（オプション）
-            if (error.code === 'resource-exhausted') {
-                console.warn("Firestore書き込み制限に達しました。しばらく待ってから再試行してください。");
-            }
+            const msg = error.code === 'resource-exhausted'
+                ? 'Firestore書き込み制限に達しました。しばらく待ってから再試行してください。'
+                : `データの保存に失敗しました。(${error.code || error.message || '不明なエラー'})`;
+            setSyncError(msg);
         } finally {
             setIsSyncing(false);
         }
@@ -2392,6 +2411,7 @@ export default function App() {
 
     return (
         <>
+            {syncError && <AlertModal message={syncError} onClose={() => setSyncError('')} />}
             <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv,text/csv" style={{ display: 'none' }} />
             {(() => {
                 switch (currentPage) {
