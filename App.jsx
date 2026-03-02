@@ -6,8 +6,8 @@ import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Tras
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
 
 // --- アプリバージョン ---
-const APP_VERSION = '1.2.1';
-const APP_BUILD_DATE = '2026-02-28';
+const APP_VERSION = '1.2.2';
+const APP_BUILD_DATE = '2026-03-02';
 
 // --- Firebase設定 ---
 // アップロードされたファイルの設定値を適用しています
