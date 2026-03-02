@@ -6,7 +6,7 @@ import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Tras
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
 
 // --- アプリバージョン ---
-const APP_VERSION = '1.2.2';
+const APP_VERSION = '1.3.0';
 const APP_BUILD_DATE = '2026-03-02';
 
 // --- Firebase設定 ---
@@ -1227,7 +1227,8 @@ const TimetableScreen = ({
     hourlyMetrics, setHourlyMetrics,
     onBack, masterData, onSync, isSyncing, 
     selectedDate, setSelectedDate, onImportRequest,
-    lanes, setLanes
+    lanes, setLanes,
+    markAssignmentDirty, markMetricsDirty, markTemplatesDirty
 }) => {
     const [viewMode, setViewMode] = useState('operational');
     const [selectedPatternId, setSelectedPatternId] = useState(null);
@@ -1322,10 +1323,8 @@ const TimetableScreen = ({
                 [selectedPatternId]: { ...currentStoreTemplates[selectedPatternId], assignments: newDataSet }
             };
             setTemplates(updatedTemplates);
+            markTemplatesDirty();
         } else {
-            // setAssignments は App 側で setAssignmentsWithRef として渡されているため、
-            // 関数形式で呼ぶと prev には assignmentsLatestRef.current が渡され最新値を参照できる
-            // ※ TimetableScreen のスコープ外にある assignmentsLatestRef を直接参照するのは誤りのため修正
             setAssignments(prev => {
                 const otherStoresAssignments = prev[selectedDate]?.filter(a => a.storeId !== currentUser.storeId) || [];
                 return {
@@ -1333,6 +1332,7 @@ const TimetableScreen = ({
                     [selectedDate]: [...otherStoresAssignments, ...newDataSet]
                 };
             });
+            markAssignmentDirty(selectedDate);
         }
     };
     
@@ -1356,6 +1356,7 @@ const TimetableScreen = ({
                 [currentUser.storeId]: newData
             }
         }));
+        markMetricsDirty(selectedDate);
         setIsMetricsModalOpen(false);
     };
 
@@ -1394,6 +1395,7 @@ const TimetableScreen = ({
             [newPatternId]: { name: patternName, assignments: [] }
         };
         setTemplates(newTemplates);
+        markTemplatesDirty();
         setSelectedPatternId(newPatternId);
         setModalState({ isOpen: false, type: null });
     };
@@ -1408,6 +1410,7 @@ const TimetableScreen = ({
             [newPatternId]: { name: newPatternName, assignments: copiedAssignments }
         };
         setTemplates(newTemplates);
+        markTemplatesDirty();
         setSelectedPatternId(newPatternId);
         setModalState({ isOpen: false, type: null });
     };
@@ -1417,6 +1420,7 @@ const TimetableScreen = ({
         const newStoreTemplates = { ...currentStoreTemplates };
         delete newStoreTemplates[selectedPatternId];
         setTemplates(newStoreTemplates);
+        markTemplatesDirty();
         const remainingIds = Object.keys(newStoreTemplates);
         setSelectedPatternId(remainingIds.length > 0 ? remainingIds[0] : null);
         setModalState({ isOpen: false, type: null });
@@ -1490,6 +1494,7 @@ const TimetableScreen = ({
             [newPatternId]: { name: patternName, assignments: parsedCsvData }
         };
         setTemplates(newTemplates);
+        markTemplatesDirty();
         setSelectedPatternId(newPatternId);
         setParsedCsvData(null);
         setModalState({ isOpen: false, type: null });
@@ -1963,6 +1968,14 @@ export default function App() {
         setTemplates(next);
     };
 
+    // 変更された日付とデータ種別を追跡（保存時に変更分のみ送信するため）
+    const dirtyAssignmentDatesRef = useRef(new Set());
+    const dirtyMetricsDatesRef = useRef(new Set());
+    const dirtyTemplatesRef = useRef(false);
+    const markAssignmentDirty = (date) => dirtyAssignmentDatesRef.current.add(date);
+    const markMetricsDirty = (date) => dirtyMetricsDatesRef.current.add(date);
+    const markTemplatesDirty = () => { dirtyTemplatesRef.current = true; };
+
     const fetchAllData = async (firestore) => {
         setIsAssignmentsReady(false);
         try {
@@ -2193,12 +2206,15 @@ export default function App() {
             // 常に ref から最新を参照（編集直後に保存した際のクロージャの古い state で上書きされる不具合を防止）
             const safeAssignments = assignmentsLatestRef.current || {};
             
-            // assignmentsの準備（配列でない日付はスキップしてクラッシュ防止）
-            // 店舗名でも正規IDでもマッチできるよう、現在の店舗名も取得しておく
+            // 変更された日付のみ保存する（全日付を一括送信すると Firestore の 10 MiB バッチ上限を超過するため）
+            const dirtyAssignmentDates = dirtyAssignmentDatesRef.current;
+            const dirtyMetricsDates = dirtyMetricsDatesRef.current;
+            const isTemplatesDirty = dirtyTemplatesRef.current;
+
             const currentStoreName = masterData.stores.find(s => s.id === currentUser.storeId)?.name;
 
             const assignmentOps = [];
-            Object.keys(safeAssignments).forEach(date => {
+            dirtyAssignmentDates.forEach(date => {
                 const dayTasks = safeAssignments[date];
                 if (!Array.isArray(dayTasks)) return;
                 const tasksForCurrentUserStore = dayTasks
@@ -2221,15 +2237,15 @@ export default function App() {
                   });
                 
                 const docRef = doc(db, 'assignments', `${currentUser.storeId}_${date}`);
-                // 空配列で上書きしない（storeId 不一致などでフィルタ結果が空のときに、既存データを消してしまう不具合を防止。東町店のみで起きる現象の対策）
                 if (tasksForCurrentUserStore.length > 0) {
                     assignmentOps.push({ docRef, data: { tasks: tasksForCurrentUserStore } });
                 }
             });
             
-            // hourlyMetricsの準備（正規IDまたは店舗名のどちらでもマッチ）
             const metricsOps = [];
-            Object.entries(hourlyMetrics || {}).forEach(([date, storeData]) => {
+            dirtyMetricsDates.forEach(date => {
+                const storeData = (hourlyMetrics || {})[date];
+                if (!storeData) return;
                 const metricsData = storeData[currentUser.storeId] || (currentStoreName && storeData[currentStoreName]);
                 if (metricsData) {
                     const docRef = doc(db, 'hourly_metrics', `${currentUser.storeId}_${date}`);
@@ -2237,11 +2253,8 @@ export default function App() {
                 }
             });
             
-            // templatesの準備
-            // templatesLoadedRef が true（Firestoreから正常ロード済み）の場合のみ書き込む
-            // 未ロード時に templates = {} で上書きしてデータが消えるのを防ぐ
             const allOps = [...assignmentOps, ...metricsOps];
-            if (templatesLoadedRef.current) {
+            if (isTemplatesDirty && templatesLoadedRef.current) {
                 const templatesDocRef = doc(db, 'templates', currentUser.storeId);
                 allOps.push({ docRef: templatesDocRef, data: templatesLatestRef.current || {} });
             }
@@ -2263,13 +2276,15 @@ export default function App() {
                 await batch.commit();
             }
             
+            // 保存成功 → dirty フラグをクリア
+            dirtyAssignmentDatesRef.current = new Set();
+            dirtyMetricsDatesRef.current = new Set();
+            dirtyTemplatesRef.current = false;
+
             setShowSaveSuccess(true);
             setTimeout(() => setShowSaveSuccess(false), 2000);
             
             if (shouldExport && currentPage === 'timetable') handleExportAssignmentsCSV();
-            // 保存直後の refetch は行わない（Firestore の eventual consistency により、
-            // 書き込み反映前に再取得すると古いデータで上書きされ、今日入力したデータが消える不具合の原因になる）
-            // if (shouldRefetch) await fetchAllData(db);
 
         } catch (error) {
             console.error("Error syncing data with Firestore:", error);
@@ -2327,6 +2342,7 @@ export default function App() {
         
         const otherStoresAssignments = assignments[csvDate]?.filter(a => a.storeId !== currentUser.storeId) || [];
         setAssignmentsWithRef(prev => ({ ...prev, [csvDate]: [...otherStoresAssignments, ...newTasks] }));
+        markAssignmentDirty(csvDate);
         setSelectedDate(csvDate);
         alert(`${csvDate}の作業データとして${newTasks.length}件を読み込みました。`);
     };
@@ -2432,6 +2448,9 @@ export default function App() {
                                     onImportRequest={handleImportRequest}
                                     lanes={lanes}
                                     setLanes={setLanes}
+                                    markAssignmentDirty={markAssignmentDirty}
+                                    markMetricsDirty={markMetricsDirty}
+                                    markTemplatesDirty={markTemplatesDirty}
                                 />;
                     case 'dashboard':
                         return <div className="bg-gray-900 text-white min-h-screen font-sans"><div className="max-w-screen-2xl mx-auto p-2 sm:p-4"><header className="mb-6 p-4 bg-gray-800 rounded-lg shadow-lg flex justify-between items-center"><div><h1 className="text-2xl font-bold text-indigo-400">ダッシュボード</h1><span className="text-gray-600 text-xs">v{APP_VERSION}</span></div><div className="flex items-center gap-4"><button onClick={() => handleNavigate('menu')} className="text-gray-400 hover:text-white flex items-center gap-2 text-sm"><ArrowLeft size={16}/>メニューに戻る</button></div></header><DashboardScreen allAssignments={assignments} hourlyMetrics={hourlyMetrics} currentUser={currentUser} masterData={masterData} lanes={lanes} /></div></div>;
