@@ -657,7 +657,35 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
             }).join(', ');
             return `- ${row.hour}: ${values}`;
         }).join('\n');
-        return `分析期間: ${analysisData.period.start} ~ ${analysisData.period.end}\n分析対象店舗: ${analysisData.stores.join(', ')}\n\n時間帯別平均データ:\n${analysisData.hourlyData.map(h => `- ${h.hour}:\n${analysisData.stores.map(s => `  - ${s}: 客数 ${h[s+'_customers']}人, 売上 ${h[s+'_sales']}円, 作業時間 ${h[s+'_workload']}分`).join('\n')}`).join('')}\n\n負荷指数（総作業時間(分)÷客数(人)、1.0が基準）:\n${loadIndexSummary}\n\nタスク別平均作業時間:\n${analysisData.taskData.map(t => `- ${t.name}: 全店舗平均 ${t.overallAvg}分, ${taskComparisonStore && stores.find(s=>s.id === taskComparisonStore)?.name}平均 ${t.storeAvg}分`).join('\n')}\n\n担当者別タスク平均作業時間:\n${analysisData.individualData.map(t => `- ${t.taskName}:\n${t.workerAverages.map(w => `  - ${w.worker}: ${w.avg}分`).join('\n')}`).join('')}`;
+        // 全店舗×タスク別の平均作業時間
+        const taskStoreStats = {};
+        filteredData.forEach(task => {
+            const d = parseInt(task.duration, 10);
+            if (isNaN(d) || d <= 0 || !task.taskName) return;
+            if (!taskStoreStats[task.taskName]) taskStoreStats[task.taskName] = { all: { total: 0, count: 0 }, byStore: {} };
+            const entry = taskStoreStats[task.taskName];
+            entry.all.total += d;
+            entry.all.count++;
+            if (!entry.byStore[task.storeId]) entry.byStore[task.storeId] = { total: 0, count: 0 };
+            entry.byStore[task.storeId].total += d;
+            entry.byStore[task.storeId].count++;
+        });
+
+        const taskStoreSummary = Object.entries(taskStoreStats)
+            .sort(([, a], [, b]) => b.all.count - a.all.count) // 実施回数の多い順
+            .map(([taskName, s]) => {
+                const overall = Math.round(s.all.total / s.all.count);
+                const storeParts = (stores || [])
+                    .filter(store => comparisonStores.includes(store.id) && s.byStore[store.id])
+                    .map(store => {
+                        const st = s.byStore[store.id];
+                        return `${store.name} ${Math.round(st.total / st.count)}分(${st.count}回)`;
+                    })
+                    .join(', ');
+                return `- ${taskName}: 全店平均 ${overall}分 | ${storeParts}`;
+            })
+            .join('\n');
+        return `分析期間: ${analysisData.period.start} ~ ${analysisData.period.end}\n分析対象店舗: ${analysisData.stores.join(', ')}\n\n時間帯別平均データ:\n${analysisData.hourlyData.map(h => `- ${h.hour}:\n${analysisData.stores.map(s => `  - ${s}: 客数 ${h[s+'_customers']}人, 売上 ${h[s+'_sales']}円, 作業時間 ${h[s+'_workload']}分`).join('\n')}`).join('')}\n\n負荷指数（総作業時間(分)÷客数(人)、1.0が基準）:\n${loadIndexSummary}\n\nタスク別平均作業時間（店舗別・実施回数付き）:\n${taskStoreSummary}\n\n担当者別タスク平均作業時間:\n${analysisData.individualData.map(t => `- ${t.taskName}:\n${t.workerAverages.map(w => `  - ${w.worker}: ${w.avg}分`).join('\n')}`).join('')}`;
     };
 
     const handleInitialAnalysis = async () => {
@@ -677,7 +705,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
 
 2. **【余裕のない時間帯】**: 負荷指数が基準1.0に最も近づく時間帯（多くは朝の通勤ラッシュ）は、レジ以外の作業をする余力がない時間帯です。全店共通の傾向として特定し、この時間帯への作業追加を避けるよう警告してください。
 
-3. **【店舗間の恒常的な差】**: 日中〜夜に、他店より負荷指数が恒常的に高い店舗があれば特定してください。原因候補として (a)実際の作業量の差、(b)作業の習熟度、(c)申告時間の過大、の3つを挙げ、タスク別平均時間の比較データで裏取りし、突出しているタスクを名指ししてください。
+3. **【店舗間の恒常的な差】**: 日中〜夜に、他店より負荷指数が恒常的に高い店舗があれば特定してください。原因候補として (a)実際の作業量の差、(b)作業の習熟度、(c)申告時間の過大、の3つを挙げ、タスク別平均時間の比較データで裏取りし、突出しているタスクを名指ししてください。タスク別データは全店舗分・実施回数付きで提供されます。実施回数が少ないタスク（3回未満）は平均が不安定なため、断定の根拠にしないでください。
 
 4. **【入力漏れの疑い】**: 負荷指数が不自然に低い（谷になる）時間帯は、忙しくて作業が回っていないか、作業時間の入力漏れの可能性があります。該当があれば店舗名と時間帯を指摘してください。
 
