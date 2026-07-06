@@ -4,6 +4,12 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, Responsi
 import { calcRegisterGuide, toLocalDateString } from '../lib/utils';
 import { LoadingSpinner } from '../components/common';
 
+// Gemini APIキー（プロジェクト直下の .env の VITE_GEMINI_API_KEY から読み込む。
+// 公開リポジトリのためキーのコード直書き・コミットは厳禁）
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+// 使用モデル
+const GEMINI_MODEL = 'gemini-2.5-flash';
+
 /**
  * ヒートマップ詳細モーダル
  */
@@ -644,7 +650,14 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
             return { taskName, workerAverages };
         });
         analysisDataRef.current = analysisData;
-        return `分析期間: ${analysisData.period.start} ~ ${analysisData.period.end}\n分析対象店舗: ${analysisData.stores.join(', ')}\n\n時間帯別平均データ:\n${analysisData.hourlyData.map(h => `- ${h.hour}:\n${analysisData.stores.map(s => `  - ${s}: 客数 ${h[s+'_customers']}人, 売上 ${h[s+'_sales']}円, 作業時間 ${h[s+'_workload']}分`).join('\n')}`).join('')}\n\nタスク別平均作業時間:\n${analysisData.taskData.map(t => `- ${t.name}: 全店舗平均 ${t.overallAvg}分, ${taskComparisonStore && stores.find(s=>s.id === taskComparisonStore)?.name}平均 ${t.storeAvg}分`).join('\n')}\n\n担当者別タスク平均作業時間:\n${analysisData.individualData.map(t => `- ${t.taskName}:\n${t.workerAverages.map(w => `  - ${w.worker}: ${w.avg}分`).join('\n')}`).join('')}`;
+        const loadIndexSummary = loadIndexData.map(row => {
+            const values = analysisData.stores.map(name => {
+                const v = row[name];
+                return `${name} ${v === null || v === undefined ? 'データなし' : v}`;
+            }).join(', ');
+            return `- ${row.hour}: ${values}`;
+        }).join('\n');
+        return `分析期間: ${analysisData.period.start} ~ ${analysisData.period.end}\n分析対象店舗: ${analysisData.stores.join(', ')}\n\n時間帯別平均データ:\n${analysisData.hourlyData.map(h => `- ${h.hour}:\n${analysisData.stores.map(s => `  - ${s}: 客数 ${h[s+'_customers']}人, 売上 ${h[s+'_sales']}円, 作業時間 ${h[s+'_workload']}分`).join('\n')}`).join('')}\n\n負荷指数（総作業時間(分)÷客数(人)、1.0が基準）:\n${loadIndexSummary}\n\nタスク別平均作業時間:\n${analysisData.taskData.map(t => `- ${t.name}: 全店舗平均 ${t.overallAvg}分, ${taskComparisonStore && stores.find(s=>s.id === taskComparisonStore)?.name}平均 ${t.storeAvg}分`).join('\n')}\n\n担当者別タスク平均作業時間:\n${analysisData.individualData.map(t => `- ${t.taskName}:\n${t.workerAverages.map(w => `  - ${w.worker}: ${w.avg}分`).join('\n')}`).join('')}`;
     };
 
     const handleInitialAnalysis = async () => {
@@ -653,11 +666,31 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
         setChatHistory([]);
         try {
             const dataSummary = prepareAnalysisData();
-            const systemPrompt = "あなたは、コンビニエンスストアや小売店の運営を改善するための優秀なビジネスアナリストです。\n提供されたデータを分析し、プロフェッショナルで洞察に満ちた改善提案レポートをMarkdown形式で作成してください。\n\nレポートには必ず以下の3つの視点を含めてください：\n\n1.  **【時間帯の最適化】**: 売上や客数のピーク・オフピークに対して、人員（総作業時間）が適切に配置されているか分析し、過不足がある時間帯を指摘してください。\n2.  **【タスクの効率化】**: 他店舗と比較して、特定の作業の平均時間が著しく長い店舗やタスクを特定し、その原因の可能性と改善策を提案してください。\n3.  **【個人のパフォーマンスと育成機会】**: 特定の重要なタスクにおいて、作業時間が平均より特に速い、または遅い担当者を特定してください。\n    -   遅い担当者については、トレーニングやマニュアル見直しの機会として提案してください。\n    -   速い担当者については、そのノウハウをチームで共有することを提案してください。\n    -   ただし、平均より極端に速い場合は、手順の抜け漏れの可能性がないか確認を促す注意点も付け加えてください。\n\n**レポートの構成:**\n-   まず「エグゼクティブサマリー」として、分析結果の最も重要なポイントを2〜3行で要約してください。\n-   次に「改善のための具体的な提案」として、上記の3つの視点に基づいた具体的な分析内容と提案を記述してください。\n-   店舗名、タスク名、担当者名、具体的な数値を必ず含めて、客観的で説得力のある内容にしてください。\n-   堅苦しくなりすぎず、店長がすぐに行動に移せるような、明確でポジティブな表現を心がけてください。";
+            const systemPrompt = `あなたは、コンビニエンスストアの店舗運営を改善する優秀なビジネスアナリストです。
+提供されたデータを分析し、店長がすぐ行動に移せる改善提案レポートをMarkdown形式で作成してください。
+
+このチェーンの基準: 客数1人あたりレジ対応1分。負荷指数（総作業時間÷客数）は1.0が基準で、レジ以外の作業があるため日中は2〜5が正常域です。
+
+レポートには必ず以下の観点を含めてください：
+
+1. **【深夜帯の作業配置】**: 深夜（0〜5時）は客数が少なく固定作業が集中するため負荷指数が高くなるのは正常です。ただし店舗間でピークの時間帯と高さを比較し、突出して高い店舗・時間帯（例：指数20超）があれば指摘し、その時間にある作業が本当にその時間である必要があるか確認を促してください。
+
+2. **【余裕のない時間帯】**: 負荷指数が基準1.0に最も近づく時間帯（多くは朝の通勤ラッシュ）は、レジ以外の作業をする余力がない時間帯です。全店共通の傾向として特定し、この時間帯への作業追加を避けるよう警告してください。
+
+3. **【店舗間の恒常的な差】**: 日中〜夜に、他店より負荷指数が恒常的に高い店舗があれば特定してください。原因候補として (a)実際の作業量の差、(b)作業の習熟度、(c)申告時間の過大、の3つを挙げ、タスク別平均時間の比較データで裏取りし、突出しているタスクを名指ししてください。
+
+4. **【入力漏れの疑い】**: 負荷指数が不自然に低い（谷になる）時間帯は、忙しくて作業が回っていないか、作業時間の入力漏れの可能性があります。該当があれば店舗名と時間帯を指摘してください。
+
+5. **【個人のパフォーマンス】**: 担当者別データで平均より特に遅い/速い人がいれば、遅い人にはトレーニング機会として、速い人にはノウハウ共有を提案してください。極端に速い場合は手順の抜け漏れ確認も促してください。
+
+**レポート構成:**
+- 冒頭に「エグゼクティブサマリー」（最重要ポイント2〜3行）
+- 続けて上記観点ごとの分析と提案
+- 店舗名・時間帯・タスク名・具体的な数値を必ず含め、客観的かつ行動につながる表現で
+- 断定できないことは「可能性」として示し、確認方法（どの画面のどのデータを見るか）を添えてください`;
             const userQuery = `以下の店舗運営データを分析し、改善提案レポートを作成してください。\n\n${dataSummary}`;
             
-            const apiKey = "";
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
             const payload = { contents: [{ parts: [{ text: userQuery }] }], systemInstruction: { parts: [{ text: systemPrompt }] } };
 
             const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -690,7 +723,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
 
         try {
             const dataSummary = prepareAnalysisData();
-            const systemPrompt = "あなたは、コンビニエンスストアや小売店の運営を改善するための優秀なビジネスアナリストです。最初の分析結果とデータに基づいて、ユーザーからの追加の質問に簡潔かつ的確に答えてください。Markdown形式で、読みやすく整形してください。";
+            const systemPrompt = "あなたは、コンビニエンスストアの店舗運営を改善する優秀なビジネスアナリストです。負荷指数（総作業時間÷客数、基準1.0）を含む最初の分析結果とデータに基づいて、ユーザーからの追加の質問に簡潔かつ的確に答えてください。Markdown形式で、読みやすく整形してください。";
             const initialPrompt = { role: 'user', content: `以下の店舗運営データを分析し、改善提案レポートを作成してください。\n\n${dataSummary}` };
 
             const conversationHistory = [initialPrompt, ...updatedChatHistory].map(msg => ({
@@ -698,8 +731,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                 parts: [{ text: msg.content }]
             }));
 
-            const apiKey = "";
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
             const payload = { contents: conversationHistory, systemInstruction: { parts: [{ text: systemPrompt }] } };
 
             const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
