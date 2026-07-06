@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, User, Clock, Sparkles, Send, Loader, TrendingUp } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
-import { calcRegisterGuide, toLocalDateString } from '../lib/utils';
+import { calcRegisterGuide, toLocalDateString, BENCHMARK_TASKS } from '../lib/utils';
 import { LoadingSpinner } from '../components/common';
 
 // Gemini APIキー（プロジェクト直下の .env の VITE_GEMINI_API_KEY から読み込む。
@@ -686,7 +686,42 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                 return `- ${taskName}: 全店平均 ${overall}分 | ${storeParts}`;
             })
             .join('\n');
-        return `分析期間: ${analysisData.period.start} ~ ${analysisData.period.end}\n分析対象店舗: ${analysisData.stores.join(', ')}\nあなたの店舗（当店）: ${myStoreName}\n\n時間帯別平均データ:\n${analysisData.hourlyData.map(h => `- ${h.hour}:\n${analysisData.stores.map(s => `  - ${s}: 客数 ${h[s+'_customers']}人, 売上 ${h[s+'_sales']}円, 作業時間 ${h[s+'_workload']}分`).join('\n')}`).join('')}\n\n負荷指数（総作業時間(分)÷客数(人)、1.0が基準）:\n${loadIndexSummary}\n\nタスク別平均作業時間（店舗別・実施回数付き）:\n${taskStoreSummary}\n\n担当者別タスク平均作業時間:\n${analysisData.individualData.map(t => `- ${t.taskName}:\n${t.workerAverages.map(w => `  - ${w.worker}: ${w.avg}分(${w.count}回)`).join('\n')}`).join('')}`;
+        // 定点観測作業（BENCHMARK_TASKS）の担当者別・月別推移
+        const benchmarkTrend = {};
+        Object.entries(allAssignments || {})
+            .filter(([date]) => date >= startDate && date <= endDate)
+            .forEach(([date, tasks]) => {
+                if (!Array.isArray(tasks)) return;
+                const month = date.substring(0, 7); // YYYY-MM
+                tasks.forEach(t => {
+                    if (!BENCHMARK_TASKS.includes(t.taskName)) return;
+                    if (!comparisonStores.includes(t.storeId) || !t.worker) return;
+                    const d = parseInt(t.duration, 10);
+                    if (isNaN(d) || d <= 0) return;
+                    if (!benchmarkTrend[t.taskName]) benchmarkTrend[t.taskName] = {};
+                    if (!benchmarkTrend[t.taskName][t.worker]) benchmarkTrend[t.taskName][t.worker] = {};
+                    if (!benchmarkTrend[t.taskName][t.worker][month]) benchmarkTrend[t.taskName][t.worker][month] = { total: 0, count: 0 };
+                    benchmarkTrend[t.taskName][t.worker][month].total += d;
+                    benchmarkTrend[t.taskName][t.worker][month].count++;
+                });
+            });
+
+        const benchmarkTrendSummary = Object.entries(benchmarkTrend).map(([taskName, workers]) => {
+            const workerLines = Object.entries(workers)
+                .map(([worker, months]) => {
+                    const totalCount = Object.values(months).reduce((a, m) => a + m.count, 0);
+                    const monthParts = Object.keys(months).sort()
+                        .map(month => `${month}: ${Math.round(months[month].total / months[month].count)}分(${months[month].count}回)`)
+                        .join(' → ');
+                    return { worker, totalCount, line: `  - ${worker}: ${monthParts}` };
+                })
+                .filter(w => w.totalCount >= 3) // 期間内3回未満の担当者は除外
+                .sort((a, b) => b.totalCount - a.totalCount)
+                .map(w => w.line)
+                .join('\n');
+            return workerLines ? `- ${taskName}:\n${workerLines}` : null;
+        }).filter(Boolean).join('\n');
+        return `分析期間: ${analysisData.period.start} ~ ${analysisData.period.end}\n分析対象店舗: ${analysisData.stores.join(', ')}\nあなたの店舗（当店）: ${myStoreName}\n\n時間帯別平均データ:\n${analysisData.hourlyData.map(h => `- ${h.hour}:\n${analysisData.stores.map(s => `  - ${s}: 客数 ${h[s+'_customers']}人, 売上 ${h[s+'_sales']}円, 作業時間 ${h[s+'_workload']}分`).join('\n')}`).join('')}\n\n負荷指数（総作業時間(分)÷客数(人)、1.0が基準）:\n${loadIndexSummary}\n\nタスク別平均作業時間（店舗別・実施回数付き）:\n${taskStoreSummary}\n\n担当者別タスク平均作業時間:\n${analysisData.individualData.map(t => `- ${t.taskName}:\n${t.workerAverages.map(w => `  - ${w.worker}: ${w.avg}分(${w.count}回)`).join('\n')}`).join('')}\n\n定点観測作業の担当者別・月別推移（作業条件が一定で個人の習熟度を評価できる12作業。期間内3回以上の担当者のみ）:\n${benchmarkTrendSummary || '- 対象データなし'}`;
     };
 
     const handleInitialAnalysis = async () => {
@@ -710,7 +745,15 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
 
 4. **【当店の入力漏れの疑い】**: 当店の負荷指数が不自然に低い時間帯があれば、入力漏れまたは作業が回っていない可能性として指摘してください。
 
-5. **【当店スタッフのパフォーマンス】**: 担当者別データ（実施回数付き）から、実施回数3回以上で平均より特に遅い/速いスタッフを挙げてください。遅い人にはトレーニング機会、速い人にはノウハウ共有を提案し、極端に速い場合は手順の抜け漏れ確認も促してください。実施回数3回未満は挙げないでください。
+5. **【当店スタッフのパフォーマンスと成長】**:
+- **レジ対応は個人評価の対象外です。**レジ対応の所要時間は客数とレジ台数で決まり個人の巧拙を反映しないため、担当者別の分数で速い/遅いを絶対に評価しないでください。
+- **定点観測作業（月別推移データがある12作業）を個人評価の中心にしてください。**これらは作業条件が一定で、時間の差＝習熟度の差です。以下を分析してください：
+  (a) 平均より特に時間がかかっているスタッフ → トレーニング機会として提案
+  (b) 月別推移で**改善しているスタッフ** → 成長を具体的な数値（◯月◯分→◯月◯分）で示し、店長から本人に伝えるよう提案
+  (c) 月別推移で**悪化・停滞しているスタッフ** → 原因確認（作業内容の変化、モチベーション等）を提案
+  (d) 特に速いスタッフ → ノウハウ共有を提案（極端に速い場合は手順の抜け漏れ確認も）
+- 分析期間が1ヶ月程度以下で推移が1点しかない場合は、「成長の分析には分析期間を3ヶ月以上に設定して再実行してください」と案内してください。
+- それ以外の一般タスクの担当者別データは参考程度にとどめ、断定的な評価は避けてください。実施回数3回未満は挙げないでください。
 
 **レポート構成:**
 - 冒頭に「エグゼクティブサマリー」（当店の最重要ポイント2〜3行）
