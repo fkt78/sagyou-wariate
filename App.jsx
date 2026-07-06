@@ -6,8 +6,8 @@ import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Tras
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
 
 // --- アプリバージョン ---
-const APP_VERSION = '1.3.0';
-const APP_BUILD_DATE = '2026-03-02';
+const APP_VERSION = '1.3.1';
+const APP_BUILD_DATE = '2026-07-06';
 
 // --- Firebase設定 ---
 // アップロードされたファイルの設定値を適用しています
@@ -1317,6 +1317,33 @@ const TimetableScreen = ({
         return hourlyMetrics[selectedDate]?.[currentUser.storeId] || {};
     }, [hourlyMetrics, selectedDate, currentUser.storeId, viewMode]);
 
+    // 直近1週間（選択日の前日〜7日前）の時間帯別平均客数・平均売上
+    const weeklyAverages = useMemo(() => {
+        const result = {};
+        const base = new Date(selectedDate + 'T00:00:00');
+        for (let hour = 0; hour < 24; hour++) {
+            let custSum = 0, custCount = 0, salesSum = 0, salesCount = 0;
+            for (let i = 1; i <= 7; i++) {
+                const d = new Date(base);
+                d.setDate(base.getDate() - i);
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                const dateStr = `${y}-${m}-${day}`;
+                const hourData = hourlyMetrics[dateStr]?.[currentUser.storeId]?.[String(hour)];
+                if (hourData) {
+                    if (typeof hourData.customers === 'number') { custSum += hourData.customers; custCount++; }
+                    if (typeof hourData.sales === 'number') { salesSum += hourData.sales; salesCount++; }
+                }
+            }
+            result[hour] = {
+                customers: custCount > 0 ? Math.round(custSum / custCount) : null,
+                sales: salesCount > 0 ? Math.round(salesSum / salesCount) : null
+            };
+        }
+        return result;
+    }, [selectedDate, hourlyMetrics, currentUser.storeId]);
+
     const overdueTaskCount = useMemo(() => {
         if (viewMode !== 'operational') return 0;
         
@@ -1890,6 +1917,17 @@ const TimetableScreen = ({
                                                     />
                                                     <span className="text-xs text-gray-400">円</span>
                                                 </div>
+                                                {(weeklyAverages[hour]?.customers !== null || weeklyAverages[hour]?.sales !== null) && (
+                                                    <div className="mt-1 pt-1 border-t border-gray-600 text-center">
+                                                        <p className="text-[10px] text-gray-400">直近1週間の平均</p>
+                                                        {weeklyAverages[hour]?.customers !== null && (
+                                                            <p className="text-xs text-amber-300">{weeklyAverages[hour].customers.toLocaleString()} 人</p>
+                                                        )}
+                                                        {weeklyAverages[hour]?.sales !== null && (
+                                                            <p className="text-xs text-amber-300">¥{weeklyAverages[hour].sales.toLocaleString()}</p>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
                                         )}
                                     </div>
@@ -1915,11 +1953,14 @@ const TimetableScreen = ({
                                                                     <p className="text-xs text-gray-400">{assignment.category}</p>
                                                                 </div>
                                                                 {assignment.taskName === 'レジ対応' && (() => {
-                                                                    const guide = calcRegisterGuide(currentMetrics[hour]?.customers);
+                                                                    const actual = currentMetrics[hour]?.customers;
+                                                                    const hasActual = typeof actual === 'number' && actual > 0;
+                                                                    const source = hasActual ? actual : weeklyAverages[hour]?.customers;
+                                                                    const guide = calcRegisterGuide(source);
                                                                     if (!guide) return null;
                                                                     return (
                                                                         <p className="text-xs text-amber-300 mb-1">
-                                                                            目安: 1レジ {guide.one}分 / 2レジ {guide.two}分
+                                                                            目安{hasActual ? '' : '(平均)'}: 1レジ {guide.one}分 / 2レジ {guide.two}分
                                                                         </p>
                                                                     );
                                                                 })()}
