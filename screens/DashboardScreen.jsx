@@ -629,6 +629,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
     }, [filteredData, taskComparisonStore, workItems, comparisonCategory]);
 
     const prepareAnalysisData = () => {
+        const myStoreName = stores.find(s => s.id === currentUser.storeId)?.name || '不明';
         const analysisData = {
             period: { start: startDate, end: endDate },
             stores: comparisonStores.map(id => stores.find(s => s.id === id)?.name).filter(Boolean),
@@ -646,7 +647,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
         });
         analysisData.individualData = Object.entries(individualPerformance).map(([taskId, workers]) => {
             const taskName = workItems.find(item => item.id === taskId)?.name || '不明なタスク';
-            const workerAverages = Object.entries(workers).map(([worker, data]) => ({ worker, avg: Math.round(data.total / data.count) }));
+            const workerAverages = Object.entries(workers).map(([worker, data]) => ({ worker, avg: Math.round(data.total / data.count), count: data.count }));
             return { taskName, workerAverages };
         });
         analysisDataRef.current = analysisData;
@@ -685,7 +686,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                 return `- ${taskName}: 全店平均 ${overall}分 | ${storeParts}`;
             })
             .join('\n');
-        return `分析期間: ${analysisData.period.start} ~ ${analysisData.period.end}\n分析対象店舗: ${analysisData.stores.join(', ')}\n\n時間帯別平均データ:\n${analysisData.hourlyData.map(h => `- ${h.hour}:\n${analysisData.stores.map(s => `  - ${s}: 客数 ${h[s+'_customers']}人, 売上 ${h[s+'_sales']}円, 作業時間 ${h[s+'_workload']}分`).join('\n')}`).join('')}\n\n負荷指数（総作業時間(分)÷客数(人)、1.0が基準）:\n${loadIndexSummary}\n\nタスク別平均作業時間（店舗別・実施回数付き）:\n${taskStoreSummary}\n\n担当者別タスク平均作業時間:\n${analysisData.individualData.map(t => `- ${t.taskName}:\n${t.workerAverages.map(w => `  - ${w.worker}: ${w.avg}分`).join('\n')}`).join('')}`;
+        return `分析期間: ${analysisData.period.start} ~ ${analysisData.period.end}\n分析対象店舗: ${analysisData.stores.join(', ')}\nあなたの店舗（当店）: ${myStoreName}\n\n時間帯別平均データ:\n${analysisData.hourlyData.map(h => `- ${h.hour}:\n${analysisData.stores.map(s => `  - ${s}: 客数 ${h[s+'_customers']}人, 売上 ${h[s+'_sales']}円, 作業時間 ${h[s+'_workload']}分`).join('\n')}`).join('')}\n\n負荷指数（総作業時間(分)÷客数(人)、1.0が基準）:\n${loadIndexSummary}\n\nタスク別平均作業時間（店舗別・実施回数付き）:\n${taskStoreSummary}\n\n担当者別タスク平均作業時間:\n${analysisData.individualData.map(t => `- ${t.taskName}:\n${t.workerAverages.map(w => `  - ${w.worker}: ${w.avg}分(${w.count}回)`).join('\n')}`).join('')}`;
     };
 
     const handleInitialAnalysis = async () => {
@@ -695,27 +696,27 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
         try {
             const dataSummary = prepareAnalysisData();
             const systemPrompt = `あなたは、コンビニエンスストアの店舗運営を改善する優秀なビジネスアナリストです。
-提供されたデータを分析し、店長がすぐ行動に移せる改善提案レポートをMarkdown形式で作成してください。
+データには「あなたの店舗（当店）」が明記されています。**このレポートは当店の店長に宛てたものです。必ず当店を主語にして書いてください。**他店のデータは当店との比較材料として使い、他店への提案は書かないでください。
 
 このチェーンの基準: 客数1人あたりレジ対応1分。負荷指数（総作業時間÷客数）は1.0が基準で、レジ以外の作業があるため日中は2〜5が正常域です。
 
 レポートには必ず以下の観点を含めてください：
 
-1. **【深夜帯の作業配置】**: 深夜（0〜5時）は客数が少なく固定作業が集中するため負荷指数が高くなるのは正常です。ただし店舗間でピークの時間帯と高さを比較し、突出して高い店舗・時間帯（例：指数20超）があれば指摘し、その時間にある作業が本当にその時間である必要があるか確認を促してください。
+1. **【当店が他店に劣っている点】**: タスク別データ（全店舗分・実施回数付き）を使い、当店の平均時間が全店平均や他店より著しく長いタスクを名指しし、何分の差かを明記してください。原因候補として (a)実際の作業量の差、(b)習熟度、(c)申告時間の過大、を挙げ、確認方法を添えてください。実施回数3回未満のタスクは断定の根拠にしないでください。
 
-2. **【余裕のない時間帯】**: 負荷指数が基準1.0に最も近づく時間帯（多くは朝の通勤ラッシュ）は、レジ以外の作業をする余力がない時間帯です。全店共通の傾向として特定し、この時間帯への作業追加を避けるよう警告してください。
+2. **【当店が他店より優れている点】**: 当店の平均時間が全店平均より明確に短いタスクを挙げ、そのやり方を維持・言語化して他の作業にも応用するよう提案してください。優れている点が少なければ無理に挙げず、正直にそう書いてください。
 
-3. **【店舗間の恒常的な差】**: 日中〜夜に、他店より負荷指数が恒常的に高い店舗があれば特定してください。原因候補として (a)実際の作業量の差、(b)作業の習熟度、(c)申告時間の過大、の3つを挙げ、タスク別平均時間の比較データで裏取りし、突出しているタスクを名指ししてください。タスク別データは全店舗分・実施回数付きで提供されます。実施回数が少ないタスク（3回未満）は平均が不安定なため、断定の根拠にしないでください。
+3. **【当店の時間帯別の余力】**: 当店の負荷指数から、(a)余裕がなく作業追加を避けるべき時間帯（指数が1.0に近い）、(b)作業を追加・移動できる余力のある時間帯、(c)深夜帯で突出して高い時間帯（指数20超など）があればその作業配置の見直し、を当店のデータに基づいて具体的に示してください。
 
-4. **【入力漏れの疑い】**: 負荷指数が不自然に低い（谷になる）時間帯は、忙しくて作業が回っていないか、作業時間の入力漏れの可能性があります。該当があれば店舗名と時間帯を指摘してください。
+4. **【当店の入力漏れの疑い】**: 当店の負荷指数が不自然に低い時間帯があれば、入力漏れまたは作業が回っていない可能性として指摘してください。
 
-5. **【個人のパフォーマンス】**: 担当者別データで平均より特に遅い/速い人がいれば、遅い人にはトレーニング機会として、速い人にはノウハウ共有を提案してください。極端に速い場合は手順の抜け漏れ確認も促してください。
+5. **【当店スタッフのパフォーマンス】**: 担当者別データ（実施回数付き）から、実施回数3回以上で平均より特に遅い/速いスタッフを挙げてください。遅い人にはトレーニング機会、速い人にはノウハウ共有を提案し、極端に速い場合は手順の抜け漏れ確認も促してください。実施回数3回未満は挙げないでください。
 
 **レポート構成:**
-- 冒頭に「エグゼクティブサマリー」（最重要ポイント2〜3行）
+- 冒頭に「エグゼクティブサマリー」（当店の最重要ポイント2〜3行）
 - 続けて上記観点ごとの分析と提案
-- 店舗名・時間帯・タスク名・具体的な数値を必ず含め、客観的かつ行動につながる表現で
-- 断定できないことは「可能性」として示し、確認方法（どの画面のどのデータを見るか）を添えてください`;
+- 「当店」「当店の◯◯」という主語で、時間帯・タスク名・担当者名・具体的な数値を必ず含めること
+- 断定できないことは「可能性」として示し、確認方法を添えてください`;
             const userQuery = `以下の店舗運営データを分析し、改善提案レポートを作成してください。\n\n${dataSummary}`;
             
             const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
@@ -751,7 +752,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
 
         try {
             const dataSummary = prepareAnalysisData();
-            const systemPrompt = "あなたは、コンビニエンスストアの店舗運営を改善する優秀なビジネスアナリストです。負荷指数（総作業時間÷客数、基準1.0）を含む最初の分析結果とデータに基づいて、ユーザーからの追加の質問に簡潔かつ的確に答えてください。Markdown形式で、読みやすく整形してください。";
+            const systemPrompt = "あなたは、コンビニエンスストアの店舗運営を改善する優秀なビジネスアナリストです。データに明記された「あなたの店舗（当店）」を主語に、負荷指数（総作業時間÷客数、基準1.0）を含む最初の分析結果とデータに基づいて、ユーザーからの追加の質問に簡潔かつ的確に答えてください。Markdown形式で、読みやすく整形してください。";
             const initialPrompt = { role: 'user', content: `以下の店舗運営データを分析し、改善提案レポートを作成してください。\n\n${dataSummary}` };
 
             const conversationHistory = [initialPrompt, ...updatedChatHistory].map(msg => ({
