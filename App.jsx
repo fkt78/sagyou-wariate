@@ -54,6 +54,16 @@ const LoadingSpinner = ({ message = "データを読み込んでいます..." })
     </div>
 );
 
+/**
+ * 客数からレジ対応の目安時間を計算する（客数1人 = 1分）
+ * @returns {{ one: number, two: number } | null} 1レジ/2レジそれぞれの目安（分）。客数が無ければ null
+ */
+const calcRegisterGuide = (customers) => {
+    const n = parseInt(customers, 10);
+    if (isNaN(n) || n <= 0) return null;
+    return { one: n, two: Math.round(n / 2) };
+};
+
 
 // --- スクリーンコンポーネント ---
 
@@ -161,7 +171,7 @@ const MenuScreen = ({ currentUser, onNavigate, onLogout, masterData }) => (
  */
 const HeatmapDetailModal = ({ modalData, onClose, allAssignments, lanes }) => {
     if (!modalData) return null;
-    const { hour, laneId, storeId, startDate, endDate } = modalData;
+    const { hour, laneId, storeId, startDate, endDate, avgCustomers } = modalData;
     
     const availableDates = useMemo(() => {
         const dates = new Set();
@@ -206,6 +216,18 @@ const HeatmapDetailModal = ({ modalData, onClose, allAssignments, lanes }) => {
                     <h3 className="text-lg font-bold text-cyan-400">{`${laneName} - ${String(hour).padStart(2, '0')}:00 の作業詳細`}</h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={24} /></button>
                 </div>
+                {(() => {
+                    const guide = calcRegisterGuide(avgCustomers);
+                    if (!guide) return null;
+                    return (
+                        <div className="mx-4 mt-4 p-3 bg-amber-900/30 border border-amber-600/50 rounded-md text-sm">
+                            <p className="text-amber-300">
+                                この時間帯の平均客数: {avgCustomers}人 →
+                                レジ対応の目安: 1レジ {guide.one}分 / 2レジ {guide.two}分
+                            </p>
+                        </div>
+                    );
+                })()}
                 <div className="p-4">
                     <select value={selectedDate} onChange={e => setSelectedDate(e.target.value)} className="w-full bg-gray-700 text-white p-2 rounded-md mb-4" disabled={availableDates.length === 0}>
                         {availableDates.length > 0 ? (
@@ -580,9 +602,10 @@ const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser,
     }, [startDate, endDate, filteredData, hourlyMetrics, heatmapStore, lanes]);
 
     const handleHeatmapClick = (hour, laneId) => {
-        setHeatmapModal({ 
-            isOpen: true, 
-            data: { hour, laneId, storeId: heatmapStore, startDate, endDate } 
+        setHeatmapModal({
+            isOpen: true,
+            data: { hour, laneId, storeId: heatmapStore, startDate, endDate,
+                    avgCustomers: heatmapData[hour]?.customers || 0 }
         });
     };
     
@@ -890,19 +913,29 @@ const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser,
                         <div>
                             <h4 className="text-center font-bold mb-2">客数</h4>
                             <div className="space-y-1">
-                                {timeLine.map(hour => (
-                                    <div key={`cust-${hour}`} className="w-full p-2 rounded-md text-sm flex justify-between items-center bg-gray-700/50">
-                                        <span className="font-bold text-gray-200">{String(hour).padStart(2, '0')}:00</span>
-                                        <span className="font-semibold text-white">{(heatmapData[hour]?.customers || 0).toLocaleString()} 人</span>
-                                    </div>
-                                ))}
+                                {timeLine.map(hour => {
+                                    const guide = calcRegisterGuide(heatmapData[hour]?.customers);
+                                    return (
+                                        <div key={`cust-${hour}`} className="w-full p-2 rounded-md text-sm bg-gray-700/50 min-h-[52px]">
+                                            <div className="flex justify-between items-center">
+                                                <span className="font-bold text-gray-200">{String(hour).padStart(2, '0')}:00</span>
+                                                <span className="font-semibold text-white">{(heatmapData[hour]?.customers || 0).toLocaleString()} 人</span>
+                                            </div>
+                                            {guide && (
+                                                <div className="text-right text-xs text-amber-300 mt-0.5">
+                                                    目安 {guide.one}分/{guide.two}分
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
                             </div>
                         </div>
                         <div>
                             <h4 className="text-center font-bold mb-2">販売金額</h4>
                             <div className="space-y-1">
                                 {timeLine.map(hour => (
-                                    <div key={`sales-${hour}`} className="w-full p-2 rounded-md text-sm flex justify-between items-center bg-gray-700/50">
+                                    <div key={`sales-${hour}`} className="w-full p-2 rounded-md text-sm flex justify-between items-center bg-gray-700/50 min-h-[52px]">
                                         <span className="font-bold text-gray-200">{String(hour).padStart(2, '0')}:00</span>
                                         <span className="font-semibold text-white">¥{(heatmapData[hour]?.sales || 0).toLocaleString()}</span>
                                     </div>
@@ -914,7 +947,7 @@ const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser,
                                 <h4 className="text-center font-bold mb-2">{lane.name}</h4>
                                 <div className="space-y-1">
                                     {timeLine.map(hour => (
-                                        <button key={`${lane.id}-${hour}`} onClick={() => handleHeatmapClick(hour, lane.id)} className={`w-full p-2 rounded-md text-sm flex justify-between items-center transition-colors duration-300 ${getWorkloadColor(heatmapData[hour]?.lanes?.[lane.id] || 0)}`}>
+                                        <button key={`${lane.id}-${hour}`} onClick={() => handleHeatmapClick(hour, lane.id)} className={`w-full p-2 rounded-md text-sm flex justify-between items-center transition-colors duration-300 min-h-[52px] ${getWorkloadColor(heatmapData[hour]?.lanes?.[lane.id] || 0)}`}>
                                             <span className="font-bold text-gray-200">{String(hour).padStart(2, '0')}:00</span>
                                             <span className="font-semibold text-white">{heatmapData[hour]?.lanes?.[lane.id] || 0} 分</span>
                                         </button>
@@ -1881,6 +1914,15 @@ const TimetableScreen = ({
                                                                     <p className="font-semibold">{assignment.taskName}</p>
                                                                     <p className="text-xs text-gray-400">{assignment.category}</p>
                                                                 </div>
+                                                                {assignment.taskName === 'レジ対応' && (() => {
+                                                                    const guide = calcRegisterGuide(currentMetrics[hour]?.customers);
+                                                                    if (!guide) return null;
+                                                                    return (
+                                                                        <p className="text-xs text-amber-300 mb-1">
+                                                                            目安: 1レジ {guide.one}分 / 2レジ {guide.two}分
+                                                                        </p>
+                                                                    );
+                                                                })()}
                                                                 <div className="space-y-1">
                                                                     <div className="flex items-center gap-1 bg-gray-800 rounded">
                                                                         <User size={14} className="text-gray-500 ml-1 shrink-0"/>
