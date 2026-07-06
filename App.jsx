@@ -6,7 +6,7 @@ import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Tras
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
 
 // --- アプリバージョン ---
-const APP_VERSION = '1.3.2';
+const APP_VERSION = '1.3.3';
 const APP_BUILD_DATE = '2026-07-06';
 
 // --- Firebase設定 ---
@@ -2066,9 +2066,28 @@ export default function App() {
     const dirtyAssignmentDatesRef = useRef(new Set());
     const dirtyMetricsDatesRef = useRef(new Set());
     const dirtyTemplatesRef = useRef(false);
-    const markAssignmentDirty = (date) => dirtyAssignmentDatesRef.current.add(date);
-    const markMetricsDirty = (date) => dirtyMetricsDatesRef.current.add(date);
-    const markTemplatesDirty = () => { dirtyTemplatesRef.current = true; };
+
+    // 未保存の変更を検知するためのカウンタ（refは再描画を起こさないため、stateで変更を通知する）
+    const [dirtyCounter, setDirtyCounter] = useState(0);
+
+    const markAssignmentDirty = (date) => {
+        dirtyAssignmentDatesRef.current.add(date);
+        setDirtyCounter(c => c + 1);
+    };
+    const markMetricsDirty = (date) => {
+        dirtyMetricsDatesRef.current.add(date);
+        setDirtyCounter(c => c + 1);
+    };
+    const markTemplatesDirty = () => {
+        dirtyTemplatesRef.current = true;
+        setDirtyCounter(c => c + 1);
+    };
+
+    // 未保存の変更が残っているか
+    const hasUnsavedChanges = () =>
+        dirtyAssignmentDatesRef.current.size > 0 ||
+        dirtyMetricsDatesRef.current.size > 0 ||
+        dirtyTemplatesRef.current;
 
     const fetchAllData = async (firestore) => {
         setIsAssignmentsReady(false);
@@ -2189,9 +2208,16 @@ export default function App() {
         }
         
         // beforeunloadイベントでリロード検知（より確実）
-        const handleBeforeUnload = () => {
-            // リロード時にセッションストレージをクリア
+        const handleBeforeUnload = (e) => {
+            // リロード時にセッションストレージをクリア（既存動作）
             sessionStorage.removeItem('isLoggedIn');
+            // 未保存の変更があれば、ブラウザ標準の確認ダイアログを表示
+            if (dirtyAssignmentDatesRef.current.size > 0 ||
+                dirtyMetricsDatesRef.current.size > 0 ||
+                dirtyTemplatesRef.current) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
         };
         
         window.addEventListener('beforeunload', handleBeforeUnload);
@@ -2390,6 +2416,19 @@ export default function App() {
             setIsSyncing(false);
         }
     };
+
+    // 自動保存：変更が止まってから5秒後に、変更分のみ保存する
+    // （手動保存と違い CSVエクスポートはしない。isSyncing中は次の変更まで持ち越し）
+    useEffect(() => {
+        if (dirtyCounter === 0) return;
+        if (!currentUser || !isUserDataLoaded || !isAssignmentsReady || !isMasterDataReady) return;
+        const timer = setTimeout(() => {
+            if (hasUnsavedChanges() && !isSyncing) {
+                handleSync(false, false);
+            }
+        }, 5000);
+        return () => clearTimeout(timer);
+    }, [dirtyCounter]);
 
     const handleImportRequest = (callback) => {
         setOnFileReadCallback(() => callback);
