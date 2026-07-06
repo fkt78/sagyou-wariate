@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, onSnapshot, updateDoc, collection, getDocs, writeBatch, getDoc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, onSnapshot, updateDoc, collection, getDocs, writeBatch, getDoc, deleteDoc, query, where, documentId } from 'firebase/firestore';
 import { getAuth, signInAnonymously, onAuthStateChanged, signOut, signInWithCustomToken } from 'firebase/auth';
 import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Trash2, LogIn, AlertTriangle, Layers, Save, LayoutDashboard, ArrowLeft, TrendingUp, Loader, Image as ImageIcon, ChevronDown, ChevronRight, Folder, RefreshCw, Check, Download, Upload, Sheet, Sparkles, Send, RotateCcw } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
 
 // --- アプリバージョン ---
-const APP_VERSION = '1.3.3';
+const APP_VERSION = '1.3.4';
 const APP_BUILD_DATE = '2026-07-06';
 
 // --- Firebase設定 ---
@@ -451,7 +451,7 @@ const AIAnalysisChat = ({ chatHistory, userInput, setUserInput, onSendMessage, i
 /**
  * ダッシュボード画面コンポーネント
  */
-const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser, masterData = {}, lanes = [] }) => {
+const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser, masterData = {}, lanes = [], onEnsureDataFrom = () => {} }) => {
     const { stores = [], workItems = [], staff = [] } = masterData;
     const today = new Date();
     const weekAgo = new Date(today);
@@ -477,6 +477,11 @@ const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser,
         return acc;
     }, {}), [stores]);
     const [visibleData, setVisibleData] = useState(initialVisibility);
+
+    // 分析期間が読み込み済み範囲より前に設定されたら追加読み込み
+    useEffect(() => {
+        onEnsureDataFrom(startDate);
+    }, [startDate]);
 
     const handleVisibilityToggle = (storeId, metric) => {
         setVisibleData(prev => ({
@@ -2089,23 +2094,54 @@ export default function App() {
         dirtyMetricsDatesRef.current.size > 0 ||
         dirtyTemplatesRef.current;
 
+    // 読み込み済みデータの最古日付（これより前は未読み込み）
+    const loadedFromRef = useRef(null);
+    // 追い読みの多重実行防止
+    const isLoadingOlderRef = useRef(false);
+
+    // 起動時の読み込み開始日（今日から3ヶ月前）を返す
+    const getDefaultLoadFrom = () => {
+        const d = new Date();
+        d.setMonth(d.getMonth() - 3);
+        return toLocalDateString(d);
+    };
+
+    // 店舗ID・店舗名の両プレフィックスで、期間内のドキュメントを範囲クエリで取得する
+    const fetchDocsInRange = async (firestore, collectionName, storesList, fromStr, toStr) => {
+        const prefixes = [...new Set(storesList.flatMap(s => [s.id, s.name]))];
+        const snapshots = await Promise.all(prefixes.map(prefix =>
+            getDocs(query(
+                collection(firestore, collectionName),
+                where(documentId(), '>=', `${prefix}_${fromStr}`),
+                where(documentId(), '<=', `${prefix}_${toStr}`)
+            ))
+        ));
+        return snapshots.flatMap(snap => snap.docs);
+    };
+
     const fetchAllData = async (firestore) => {
         setIsAssignmentsReady(false);
         try {
             const storesRef = collection(firestore, 'artifacts/general-master-data/public/data/stores');
             const employeesRef = collection(firestore, 'artifacts/general-master-data/public/data/employees');
             const workItemsRef = collection(firestore, 'artifacts/general-master-data/public/data/work_items');
-            const assignmentsRef = collection(firestore, 'assignments');
-            const metricsRef = collection(firestore, 'hourly_metrics');
             
-            const [storesSnapshot, employeesSnapshot, workItemsSnapshot, assignmentsSnapshot, metricsSnapshot] = await Promise.all([
-                getDocs(storesRef), getDocs(employeesRef), getDocs(workItemsRef), getDocs(assignmentsRef), getDocs(metricsRef)
+            const [storesSnapshot, employeesSnapshot, workItemsSnapshot] = await Promise.all([
+                getDocs(storesRef), getDocs(employeesRef), getDocs(workItemsRef)
             ]);
 
             const allStores = storesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             const allowedStoreNames = ["伊賀平野東町店", "伊賀平野北谷店", "伊賀忍者市駅南店"];
             const storesList = allStores.filter(store => allowedStoreNames.includes(store.name));
             storesList.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+
+            // 直近3ヶ月分のみ読み込む（それ以前は必要時に追い読みする）
+            const loadFrom = getDefaultLoadFrom();
+            const [assignmentDocs, metricsDocs] = await Promise.all([
+                fetchDocsInRange(firestore, 'assignments', storesList, loadFrom, '9999-12-31'),
+                fetchDocsInRange(firestore, 'hourly_metrics', storesList, loadFrom, '9999-12-31')
+            ]);
+            loadedFromRef.current = loadFrom;
 
             const workItemsList = workItemsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             workItemsList.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
@@ -2134,7 +2170,7 @@ export default function App() {
             const normalizeStoreId = (rawId) => storeIdMap.get(rawId) || rawId;
 
             const allAssignments = {};
-            assignmentsSnapshot.forEach(doc => {
+            assignmentDocs.forEach(doc => {
                 const docId = doc.id;
                 const idParts = docId.split('_');
                 if (idParts.length < 2) return;
@@ -2166,7 +2202,7 @@ export default function App() {
             });
 
             const allMetrics = {};
-            metricsSnapshot.forEach(doc => {
+            metricsDocs.forEach(doc => {
                 const docId = doc.id;
                 const idParts = docId.split('_');
                 if (idParts.length < 2) return;
@@ -2191,6 +2227,79 @@ export default function App() {
             console.error("Error fetching data:", error);
         } finally {
             setIsAssignmentsReady(true);
+        }
+    };
+
+    // 指定日以降のデータが未読み込みなら、不足分（指定日〜読み込み済み最古日の前日）を追加読み込みする
+    const ensureDataFrom = async (targetDateStr) => {
+        if (!targetDateStr || !/^\d{4}-\d{2}-\d{2}$/.test(targetDateStr)) return;
+        const loadedFrom = loadedFromRef.current;
+        if (!loadedFrom || targetDateStr >= loadedFrom) return;
+        if (isLoadingOlderRef.current) return;
+        if (masterData.stores.length === 0) return;
+
+        isLoadingOlderRef.current = true;
+        try {
+            const prev = new Date(loadedFrom + 'T00:00:00');
+            prev.setDate(prev.getDate() - 1);
+            const toStr = toLocalDateString(prev);
+
+            const [assignmentDocs, metricsDocs] = await Promise.all([
+                fetchDocsInRange(db, 'assignments', masterData.stores, targetDateStr, toStr),
+                fetchDocsInRange(db, 'hourly_metrics', masterData.stores, targetDateStr, toStr)
+            ]);
+
+            const storeIdMap = new Map();
+            masterData.stores.forEach(store => {
+                storeIdMap.set(store.id, store.id);
+                storeIdMap.set(store.name, store.id);
+            });
+            const normalizeStoreId = (rawId) => storeIdMap.get(rawId) || rawId;
+
+            const olderAssignments = {};
+            assignmentDocs.forEach(doc => {
+                const idParts = doc.id.split('_');
+                if (idParts.length < 2) return;
+                const storeIdFromDoc = idParts.slice(0, -1).join('_');
+                const date = idParts[idParts.length - 1];
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+                const storeId = normalizeStoreId(storeIdFromDoc);
+                if (!olderAssignments[date]) olderAssignments[date] = [];
+                const tasksWithStoreId = (doc.data().tasks || []).map(t => ({
+                    ...t,
+                    storeId,
+                    isFromTemplate: t.isFromTemplate !== undefined ? t.isFromTemplate : true
+                }));
+                olderAssignments[date].push(...tasksWithStoreId);
+            });
+            Object.keys(olderAssignments).forEach(date => {
+                const seen = new Set();
+                olderAssignments[date] = olderAssignments[date].filter(task => {
+                    if (seen.has(task.id)) return false;
+                    seen.add(task.id);
+                    return true;
+                });
+            });
+
+            const olderMetrics = {};
+            metricsDocs.forEach(doc => {
+                const idParts = doc.id.split('_');
+                if (idParts.length < 2) return;
+                const storeIdFromDoc = idParts.slice(0, -1).join('_');
+                const date = idParts[idParts.length - 1];
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+                const storeId = normalizeStoreId(storeIdFromDoc);
+                if (!olderMetrics[date]) olderMetrics[date] = {};
+                olderMetrics[date][storeId] = doc.data().hourlyData || {};
+            });
+
+            setAssignmentsWithRef(prev => ({ ...olderAssignments, ...prev }));
+            setHourlyMetrics(prev => ({ ...olderMetrics, ...prev }));
+            loadedFromRef.current = targetDateStr;
+        } catch (error) {
+            console.error("Error loading older data:", error);
+        } finally {
+            isLoadingOlderRef.current = false;
         }
     };
     
@@ -2430,6 +2539,14 @@ export default function App() {
         return () => clearTimeout(timer);
     }, [dirtyCounter]);
 
+    // 選択日付の7日前までのデータを確保（直近1週間の平均表示に必要）
+    useEffect(() => {
+        if (!isAssignmentsReady) return;
+        const d = new Date(selectedDate + 'T00:00:00');
+        d.setDate(d.getDate() - 7);
+        ensureDataFrom(toLocalDateString(d));
+    }, [selectedDate, isAssignmentsReady]);
+
     const handleImportRequest = (callback) => {
         setOnFileReadCallback(() => callback);
         fileInputRef.current.click();
@@ -2586,7 +2703,7 @@ export default function App() {
                                     markTemplatesDirty={markTemplatesDirty}
                                 />;
                     case 'dashboard':
-                        return <div className="bg-gray-900 text-white min-h-screen font-sans"><div className="max-w-screen-2xl mx-auto p-2 sm:p-4"><header className="mb-6 p-4 bg-gray-800 rounded-lg shadow-lg flex justify-between items-center"><div><h1 className="text-2xl font-bold text-indigo-400">ダッシュボード</h1><span className="text-gray-600 text-xs">v{APP_VERSION}</span></div><div className="flex items-center gap-4"><button onClick={() => handleNavigate('menu')} className="text-gray-400 hover:text-white flex items-center gap-2 text-sm"><ArrowLeft size={16}/>メニューに戻る</button></div></header><DashboardScreen allAssignments={assignments} hourlyMetrics={hourlyMetrics} currentUser={currentUser} masterData={masterData} lanes={lanes} /></div></div>;
+                        return <div className="bg-gray-900 text-white min-h-screen font-sans"><div className="max-w-screen-2xl mx-auto p-2 sm:p-4"><header className="mb-6 p-4 bg-gray-800 rounded-lg shadow-lg flex justify-between items-center"><div><h1 className="text-2xl font-bold text-indigo-400">ダッシュボード</h1><span className="text-gray-600 text-xs">v{APP_VERSION}</span></div><div className="flex items-center gap-4"><button onClick={() => handleNavigate('menu')} className="text-gray-400 hover:text-white flex items-center gap-2 text-sm"><ArrowLeft size={16}/>メニューに戻る</button></div></header><DashboardScreen allAssignments={assignments} hourlyMetrics={hourlyMetrics} currentUser={currentUser} masterData={masterData} lanes={lanes} onEnsureDataFrom={ensureDataFrom} /></div></div>;
                     case 'login':
                     default:
                         return <LoginScreen onLogin={handleLogin} masterData={masterData} />;
