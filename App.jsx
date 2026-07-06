@@ -6,7 +6,7 @@ import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Tras
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
 
 // --- アプリバージョン ---
-const APP_VERSION = '1.3.4';
+const APP_VERSION = '1.3.5';
 const APP_BUILD_DATE = '2026-07-06';
 
 // --- Firebase設定 ---
@@ -63,6 +63,23 @@ const calcRegisterGuide = (customers) => {
     if (isNaN(n) || n <= 0) return null;
     return { one: n, two: Math.round(n / 2) };
 };
+
+// 定点観測対象の作業（直近1ヶ月の平均時間を入力画面に表示する）
+// 作業名はマスターの taskName と完全一致させること
+const BENCHMARK_TASKS = [
+    'ウォークイン補充',
+    'ウォークイン補充箱開け',
+    'フローズンフェイスアップ',
+    '伝票集計',
+    '返本',
+    'コピー入金',
+    'トイレ掃除',
+    '温度チェック',
+    '仮集計',
+    '雑誌鮮度チェック',
+    '乳製品・栄ドリ補充',
+    '募金入金',
+];
 
 /**
  * Dateをローカルタイムゾーン基準の 'YYYY-MM-DD' 文字列に変換する
@@ -1360,6 +1377,41 @@ const TimetableScreen = ({
         return result;
     }, [selectedDate, hourlyMetrics, currentUser.storeId]);
 
+    // 定点観測作業の直近1ヶ月（前日〜30日前）の平均作業時間（自店・全店）
+    const benchmarkAverages = useMemo(() => {
+        const stats = {};
+        BENCHMARK_TASKS.forEach(name => {
+            stats[name] = { storeSum: 0, storeCount: 0, allSum: 0, allCount: 0 };
+        });
+        const base = new Date(selectedDate + 'T00:00:00');
+        for (let i = 1; i <= 30; i++) {
+            const d = new Date(base);
+            d.setDate(base.getDate() - i);
+            const dateStr = toLocalDateString(d);
+            const tasksOnDate = assignments[dateStr];
+            if (!Array.isArray(tasksOnDate)) continue;
+            tasksOnDate.forEach(task => {
+                if (!stats[task.taskName]) return;
+                const duration = parseInt(task.duration, 10);
+                if (isNaN(duration) || duration <= 0) return;
+                stats[task.taskName].allSum += duration;
+                stats[task.taskName].allCount++;
+                if (task.storeId === currentUser.storeId) {
+                    stats[task.taskName].storeSum += duration;
+                    stats[task.taskName].storeCount++;
+                }
+            });
+        }
+        const result = {};
+        Object.entries(stats).forEach(([name, s]) => {
+            result[name] = {
+                store: s.storeCount > 0 ? Math.round(s.storeSum / s.storeCount) : null,
+                all: s.allCount > 0 ? Math.round(s.allSum / s.allCount) : null
+            };
+        });
+        return result;
+    }, [selectedDate, assignments, currentUser.storeId]);
+
     const overdueTaskCount = useMemo(() => {
         if (viewMode !== 'operational') return 0;
         
@@ -1980,6 +2032,15 @@ const TimetableScreen = ({
                                                                         </p>
                                                                     );
                                                                 })()}
+                                                                {BENCHMARK_TASKS.includes(assignment.taskName) && (() => {
+                                                                    const avg = benchmarkAverages[assignment.taskName];
+                                                                    if (!avg || avg.all === null) return null;
+                                                                    return (
+                                                                        <p className="text-xs text-amber-300 mb-1">
+                                                                            平均: {avg.store !== null ? `店 ${avg.store}分 / ` : ''}全店 {avg.all}分
+                                                                        </p>
+                                                                    );
+                                                                })()}
                                                                 <div className="space-y-1">
                                                                     <div className="flex items-center gap-1 bg-gray-800 rounded">
                                                                         <User size={14} className="text-gray-500 ml-1 shrink-0"/>
@@ -2539,11 +2600,11 @@ export default function App() {
         return () => clearTimeout(timer);
     }, [dirtyCounter]);
 
-    // 選択日付の7日前までのデータを確保（直近1週間の平均表示に必要）
+    // 選択日付の30日前までのデータを確保（直近1週間の平均・定点観測作業の平均計算に必要）
     useEffect(() => {
         if (!isAssignmentsReady) return;
         const d = new Date(selectedDate + 'T00:00:00');
-        d.setDate(d.getDate() - 7);
+        d.setDate(d.getDate() - 30);
         ensureDataFrom(toLocalDateString(d));
     }, [selectedDate, isAssignmentsReady]);
 
