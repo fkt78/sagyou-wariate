@@ -292,6 +292,20 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
     
     const [startDate, setStartDate] = useState(toLocalDateString(weekAgo));
     const [endDate, setEndDate] = useState(toLocalDateString(today));
+
+    // 分析期間のワンタップ設定（months=0.25は1週間扱い）
+    const applyPeriodPreset = (preset) => {
+        const end = new Date();
+        const start = new Date();
+        if (preset === 'week') {
+            start.setDate(start.getDate() - 6);
+        } else {
+            start.setMonth(start.getMonth() - preset); // preset = 1, 3, 6, 12
+        }
+        setStartDate(toLocalDateString(start));
+        setEndDate(toLocalDateString(end));
+    };
+
     const [comparisonStores, setComparisonStores] = useState(stores.map(s => s.id));
     const [heatmapStore, setHeatmapStore] = useState(currentUser.storeId);
     const [detailStore, setDetailStore] = useState(currentUser.storeId);
@@ -846,11 +860,30 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                 <div className="bg-gray-800 p-4 rounded-lg space-y-4">
                     <div><h3 className="text-lg font-bold text-cyan-400 mb-2">フィルター設定</h3></div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="flex items-center gap-4">
-                            <label htmlFor="start-date" className="text-sm">分析期間:</label>
-                            <input type="date" id="start-date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-gray-700 text-white p-2 rounded-md" />
-                            <span>〜</span>
-                            <input type="date" id="end-date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-gray-700 text-white p-2 rounded-md" />
+                        <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-4 flex-wrap">
+                                <label htmlFor="start-date" className="text-sm">分析期間:</label>
+                                <input type="date" id="start-date" value={startDate} onChange={e => setStartDate(e.target.value)} className="bg-gray-700 text-white p-2 rounded-md" />
+                                <span>〜</span>
+                                <input type="date" id="end-date" value={endDate} onChange={e => setEndDate(e.target.value)} className="bg-gray-700 text-white p-2 rounded-md" />
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                {[
+                                    { label: '1週間', value: 'week' },
+                                    { label: '1ヶ月', value: 1 },
+                                    { label: '3ヶ月', value: 3 },
+                                    { label: '半年', value: 6 },
+                                    { label: '1年', value: 12 },
+                                ].map(p => (
+                                    <button
+                                        key={p.label}
+                                        onClick={() => applyPeriodPreset(p.value)}
+                                        className="px-3 py-1 text-sm rounded-md bg-gray-700 hover:bg-cyan-700 text-gray-200 transition-colors"
+                                    >
+                                        {p.label}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
                         <div className="flex items-center gap-4">
                             <label className="text-sm">比較対象店舗:</label>
