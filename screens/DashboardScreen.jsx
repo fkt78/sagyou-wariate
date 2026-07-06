@@ -305,6 +305,9 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
     }, {}), [stores]);
     const [visibleData, setVisibleData] = useState(initialVisibility);
 
+    // パフォーマンス分析の表示モード: 'detail'（従来の詳細表示） | 'load'（負荷分析）
+    const [perfViewMode, setPerfViewMode] = useState('load');
+
     // 分析期間が読み込み済み範囲より前に設定されたら追加読み込み
     useEffect(() => {
         onEnsureDataFrom(startDate);
@@ -509,6 +512,21 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
         }
         return chartData;
     }, [startDate, endDate, hourlyMetrics, allAssignments, stores]);
+
+    // 負荷指数（総作業時間(分) ÷ 客数(人)）: 店舗別・時間帯別
+    const loadIndexData = useMemo(() => {
+        return performanceData.map(hourData => {
+            const row = { hour: hourData.hour };
+            (stores || []).forEach(store => {
+                const customers = hourData[`${store.name}_customers`];
+                const workload = hourData[`${store.name}_workload`];
+                row[store.name] = (typeof customers === 'number' && customers > 0 && typeof workload === 'number')
+                    ? Math.round((workload / customers) * 100) / 100
+                    : null;
+            });
+            return row;
+        });
+    }, [performanceData, stores]);
 
     const timeByWorker = useMemo(() => {
         const workerData = filteredData.filter(t => t.storeId === detailStore).reduce((acc, task) => {
@@ -801,7 +819,15 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                     </div>
                 </div>
                 <div className="bg-gray-800 p-6 rounded-lg">
-                    <h3 className="text-lg font-bold text-cyan-400 mb-4">店舗別 時間帯パフォーマンス分析</h3>
+                    <div className="flex items-center gap-4 mb-4">
+                        <h3 className="text-lg font-bold text-cyan-400">店舗別 時間帯パフォーマンス分析</h3>
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => setPerfViewMode('load')} className={`px-3 py-1 text-sm rounded-md ${perfViewMode === 'load' ? 'bg-cyan-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>負荷分析</button>
+                            <button onClick={() => setPerfViewMode('detail')} className={`px-3 py-1 text-sm rounded-md ${perfViewMode === 'detail' ? 'bg-cyan-600 text-white' : 'bg-gray-700 hover:bg-gray-600'}`}>詳細表示</button>
+                        </div>
+                    </div>
+                    {perfViewMode === 'detail' && (
+                    <>
                     <div className="flex flex-wrap gap-x-6 gap-y-3 mb-6 p-3 bg-gray-900/50 rounded-lg">
                         {stores.map(store => (
                             <div key={store.id} className="flex items-center gap-4 p-2 rounded-lg" style={{ border: `1px solid ${STORE_COLORS[store.id]}` }}>
@@ -846,6 +872,32 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                             })}
                         </ComposedChart>
                     </ResponsiveContainer>
+                    </>
+                    )}
+                    {perfViewMode === 'load' && (
+                    <>
+                        <p className="text-sm text-gray-400 mb-4">
+                            負荷指数 ＝ 総作業時間（分）÷ 客数（人）。1.0が「客数1人あたり作業1分」の基準。
+                            高い時間帯は作業が重い（または人員余剰・過大申告）、低い時間帯は作業が回っていない（または入力漏れ）可能性。
+                        </p>
+                        <ResponsiveContainer width="100%" height={400}>
+                            <LineChart data={loadIndexData} margin={{ top: 5, right: 20, left: 20, bottom: 5 }}>
+                                <XAxis dataKey="hour" stroke="#9ca3af" fontSize={12} />
+                                <YAxis stroke="#9ca3af" fontSize={12} label={{ value: '負荷指数 (分/人)', angle: -90, position: 'insideLeft', offset: -5, fill: '#9ca3af' }} />
+                                <Tooltip contentStyle={{ backgroundColor: '#1f2937', border: 'none' }} itemStyle={{ color: '#e5e7eb' }} />
+                                <Legend wrapperStyle={{ color: '#e5e7eb' }} />
+                                <ReferenceLine y={1} stroke="#f43f5e" strokeDasharray="3 3">
+                                    <Label value="基準 1.0" position="insideTopRight" fill="#f43f5e" fontSize={12} />
+                                </ReferenceLine>
+                                {comparisonStores.map(storeId => {
+                                    const store = stores.find(s => s.id === storeId);
+                                    if (!store) return null;
+                                    return <Line key={storeId} type="monotone" dataKey={store.name} name={store.name} stroke={STORE_COLORS[storeId]} strokeWidth={3} connectNulls={false} />;
+                                })}
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </>
+                    )}
                 </div>
                 <div className="space-y-4">
                     <div className="flex justify-center">
