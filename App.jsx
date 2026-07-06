@@ -6,7 +6,7 @@ import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Tras
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
 
 // --- アプリバージョン ---
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.3.2';
 const APP_BUILD_DATE = '2026-07-06';
 
 // --- Firebase設定 ---
@@ -62,6 +62,17 @@ const calcRegisterGuide = (customers) => {
     const n = parseInt(customers, 10);
     if (isNaN(n) || n <= 0) return null;
     return { one: n, two: Math.round(n / 2) };
+};
+
+/**
+ * Dateをローカルタイムゾーン基準の 'YYYY-MM-DD' 文字列に変換する
+ * （toISOString はUTC基準のため、日本では朝9時まで前日になる問題への対策）
+ */
+const toLocalDateString = (date = new Date()) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
 };
 
 
@@ -176,8 +187,8 @@ const HeatmapDetailModal = ({ modalData, onClose, allAssignments, lanes }) => {
     const availableDates = useMemo(() => {
         const dates = new Set();
         if (!allAssignments) return [];
-        for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
-            const dateString = d.toISOString().slice(0, 10);
+        for (let d = new Date(startDate + 'T00:00:00'); d <= new Date(endDate + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
+            const dateString = toLocalDateString(d);
             if (allAssignments[dateString]) {
                 const hasTasks = allAssignments[dateString].some(task => 
                     task.storeId === storeId && parseInt(task.hour, 10) === hour && task.laneId === laneId
@@ -446,8 +457,8 @@ const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser,
     const weekAgo = new Date(today);
     weekAgo.setDate(today.getDate() - 6);
     
-    const [startDate, setStartDate] = useState(weekAgo.toISOString().slice(0, 10));
-    const [endDate, setEndDate] = useState(today.toISOString().slice(0, 10));
+    const [startDate, setStartDate] = useState(toLocalDateString(weekAgo));
+    const [endDate, setEndDate] = useState(toLocalDateString(today));
     const [comparisonStores, setComparisonStores] = useState(stores.map(s => s.id));
     const [heatmapStore, setHeatmapStore] = useState(currentUser.storeId);
     const [detailStore, setDetailStore] = useState(currentUser.storeId);
@@ -546,8 +557,8 @@ const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser,
     }, [stores]);
 
     const heatmapData = useMemo(() => {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
+        const start = new Date(startDate + 'T00:00:00');
+        const end = new Date(endDate + 'T00:00:00');
         const dayCount = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
         const numberOfDaysInPeriod = dayCount > 0 ? dayCount : 1;
         const safeLanes = Array.isArray(lanes) ? lanes : [];
@@ -572,8 +583,8 @@ const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser,
             });
         
         if (hourlyMetrics) {
-             for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
-                const dateString = d.toISOString().slice(0, 10);
+             for (let d = new Date(startDate + 'T00:00:00'); d <= new Date(endDate + 'T00:00:00'); d.setDate(d.getDate() + 1)) {
+                const dateString = toLocalDateString(d);
                 const metricsForDate = hourlyMetrics[dateString]?.[heatmapStore];
                 if (metricsForDate) {
                     for (let hour = 0; hour < 24; hour++) {
@@ -610,8 +621,8 @@ const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser,
     };
     
     const performanceData = useMemo(() => {
-        const start = new Date(startDate);
-        const end = new Date(endDate);
+        const start = new Date(startDate + 'T00:00:00');
+        const end = new Date(endDate + 'T00:00:00');
         const dayCount = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
         const numberOfDaysInPeriod = dayCount > 0 ? dayCount : 1;
 
@@ -624,7 +635,7 @@ const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, currentUser,
         }
 
         for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            const dateString = d.toISOString().slice(0, 10);
+            const dateString = toLocalDateString(d);
             
             if (hourlyMetrics && hourlyMetrics[dateString]) {
                 stores.forEach(store => {
@@ -1347,7 +1358,7 @@ const TimetableScreen = ({
     const overdueTaskCount = useMemo(() => {
         if (viewMode !== 'operational') return 0;
         
-        const todayStr = new Date().toISOString().slice(0, 10);
+        const todayStr = toLocalDateString();
         if (selectedDate > todayStr) return 0;
 
         return currentAssignments.reduce((count, task) => {
@@ -1488,9 +1499,9 @@ const TimetableScreen = ({
     
     const handleSaveAndProceed = async () => {
         await onSync(false, true);
-        const currentDate = new Date(selectedDate);
+        const currentDate = new Date(selectedDate + 'T00:00:00');
         currentDate.setDate(currentDate.getDate() + 1);
-        const nextDate = currentDate.toISOString().slice(0, 10);
+        const nextDate = toLocalDateString(currentDate);
         setSelectedDate(nextDate);
     };
     
@@ -1937,7 +1948,7 @@ const TimetableScreen = ({
                                             <div key={lane.id} className="p-2 border-r border-gray-700 last:border-r-0 min-h-[100px] flex flex-col justify-between">
                                                 <div className="space-y-2">
                                                     {hourAssignments.map(assignment => {
-                                                        const todayStr = new Date().toISOString().slice(0, 10);
+                                                        const todayStr = toLocalDateString();
                                                         const isPastTask = selectedDate < todayStr || (selectedDate === todayStr && parseInt(assignment.hour, 10) < now.getHours());
                                                         const needsAttention = viewMode === 'operational' && isPastTask && (!assignment.worker || !assignment.duration);
                                                         const isAddedTask = viewMode === 'operational' && assignment.isFromTemplate === false;
@@ -2027,7 +2038,7 @@ export default function App() {
     const [isSyncing, setIsSyncing] = useState(false);
     const [showSaveSuccess, setShowSaveSuccess] = useState(false);
     const [syncError, setSyncError] = useState('');
-    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().slice(0, 10));
+    const [selectedDate, setSelectedDate] = useState(toLocalDateString());
     const fileInputRef = useRef(null);
     const [onFileReadCallback, setOnFileReadCallback] = useState(null);
 
