@@ -1,97 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, onSnapshot, updateDoc, collection, getDocs, writeBatch, getDoc, deleteDoc, query, where, documentId } from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged, signOut, signInWithCustomToken } from 'firebase/auth';
+import { doc, setDoc, onSnapshot, updateDoc, collection, getDocs, writeBatch, getDoc, deleteDoc, query, where, documentId } from 'firebase/firestore';
+import { signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
 import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Trash2, LogIn, AlertTriangle, Layers, Save, LayoutDashboard, ArrowLeft, TrendingUp, Loader, Image as ImageIcon, ChevronDown, ChevronRight, Folder, RefreshCw, Check, Download, Upload, Sheet, Sparkles, Send, RotateCcw } from 'lucide-react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, ReferenceLine, Label, ComposedChart } from 'recharts';
-
-// --- アプリバージョン ---
-const APP_VERSION = '1.3.5';
-const APP_BUILD_DATE = '2026-07-06';
-
-// --- Firebase設定 ---
-// アップロードされたファイルの設定値を適用しています
-const firebaseConfig = {
-    apiKey: "AIzaSyAvxKaj49CfK9T5-h4AycKcguU2gsSXTxc",
-    authDomain: "new-check-137f9.firebaseapp.com",
-    projectId: "new-check-137f9",
-    storageBucket: "new-check-137f9.firebasestorage.app",
-    messagingSenderId: "534868750946",
-    appId: "1:534868750946:web:8e4341569853712bd8573b",
-    measurementId: "G-QN9H01RKQV"
-};
-
-// Canvas環境での安定動作のため、Firebase初期化はコンポーネント外で行います
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// --- 再利用可能なUIコンポーネント ---
-
-/**
- * アラートモーダルコンポーネント
- */
-const AlertModal = ({ message, onClose }) => (
-    <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-50 p-4">
-        <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-sm">
-            <div className="p-6 text-center">
-                <p className="text-white mb-4">{message}</p>
-                <button onClick={onClose} className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 px-6 rounded-lg">OK</button>
-            </div>
-        </div>
-    </div>
-);
-
-/**
- * ローディングスピナーコンポーネント
- */
-const LoadingSpinner = ({ message = "データを読み込んでいます..." }) => (
-    <div className="fixed inset-0 bg-gray-900 bg-opacity-80 flex justify-center items-center z-50">
-        <div className="flex flex-col items-center gap-4">
-            <Loader className="animate-spin text-cyan-400" size={48} />
-            <p className="text-white">{message}</p>
-        </div>
-    </div>
-);
-
-/**
- * 客数からレジ対応の目安時間を計算する（客数1人 = 1分）
- * @returns {{ one: number, two: number } | null} 1レジ/2レジそれぞれの目安（分）。客数が無ければ null
- */
-const calcRegisterGuide = (customers) => {
-    const n = parseInt(customers, 10);
-    if (isNaN(n) || n <= 0) return null;
-    return { one: n, two: Math.round(n / 2) };
-};
-
-// 定点観測対象の作業（直近1ヶ月の平均時間を入力画面に表示する）
-// 作業名はマスターの taskName と完全一致させること
-const BENCHMARK_TASKS = [
-    'ウォークイン補充',
-    'ウォークイン補充箱開け',
-    'フローズンフェイスアップ',
-    '伝票集計',
-    '返本',
-    'コピー入金',
-    'トイレ掃除',
-    '温度チェック',
-    '仮集計',
-    '雑誌鮮度チェック',
-    '乳製品・栄ドリ補充',
-    '募金入金',
-];
-
-/**
- * Dateをローカルタイムゾーン基準の 'YYYY-MM-DD' 文字列に変換する
- * （toISOString はUTC基準のため、日本では朝9時まで前日になる問題への対策）
- */
-const toLocalDateString = (date = new Date()) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-};
-
+import { app, auth, db } from './lib/firebase';
+import { APP_VERSION, APP_BUILD_DATE, calcRegisterGuide, BENCHMARK_TASKS, toLocalDateString } from './lib/utils';
+import { AlertModal, LoadingSpinner } from './components/common';
 
 // --- スクリーンコンポーネント ---
 
