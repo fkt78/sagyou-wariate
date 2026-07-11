@@ -67,7 +67,7 @@ const HeatmapDetailModal = ({ modalData, onClose, allAssignments, lanes }) => {
                         <div className="mx-4 mt-4 p-3 bg-amber-900/30 border border-amber-600/50 rounded-md text-sm">
                             <p className="text-amber-300">
                                 この時間帯の平均客数: {avgCustomers}人 →
-                                レジ対応の目安: 1レジ {guide.one}分 / 2レジ {guide.two}分
+                                レジ対応の目安: 合計{guide}分以内（全レジ計）
                             </p>
                         </div>
                     );
@@ -921,7 +921,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                                             </div>
                                             {guide && (
                                                 <div className="text-right text-xs text-amber-300 mt-0.5">
-                                                    目安 {guide.one}分/{guide.two}分
+                                                    レジ対応目安 合計{guide}分
                                                 </div>
                                             )}
                                         </div>

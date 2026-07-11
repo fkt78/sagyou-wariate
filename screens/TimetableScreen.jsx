@@ -871,9 +871,20 @@ export const TimetableScreen = ({
                                                                     const source = hasActual ? actual : weeklyAverages[hour]?.customers;
                                                                     const guide = calcRegisterGuide(source);
                                                                     if (!guide) return null;
+                                                                    // 同じ時間帯の全レジ（全レーン）のレジ対応入力時間の合計
+                                                                    const enteredTotal = currentAssignments
+                                                                        .filter(a => a.taskName === 'レジ対応' && parseInt(a.hour, 10) === hour)
+                                                                        .reduce((sum, a) => {
+                                                                            const d = parseInt(a.duration, 10);
+                                                                            return isNaN(d) ? sum : sum + d;
+                                                                        }, 0);
+                                                                    const isOver = enteredTotal > guide;
                                                                     return (
                                                                         <p className="text-xs text-amber-300 mb-1">
-                                                                            目安{hasActual ? '' : '(平均)'}: 1レジ {guide.one}分 / 2レジ {guide.two}分
+                                                                            目安{hasActual ? '' : '(平均)'}: レジ対応 合計{guide}分以内
+                                                                            {enteredTotal > 0 && (
+                                                                                <> ／ 入力計 <span className={isOver ? 'text-orange-400 font-semibold' : ''}>{enteredTotal}分</span></>
+                                                                            )}
                                                                         </p>
                                                                     );
                                                                 })()}
