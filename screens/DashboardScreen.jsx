@@ -467,11 +467,32 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
         return averages;
     }, [startDate, endDate, filteredData, hourlyMetrics, heatmapStore, lanes]);
 
+    // レジ対応目安用: 直近1週間（昨日〜7日前）の時間帯別平均客数（分析期間に依存しない）
+    const weeklyGuideCustomers = useMemo(() => {
+        const result = {};
+        const base = new Date();
+        for (let hour = 0; hour < 24; hour++) {
+            let sum = 0, count = 0;
+            for (let i = 1; i <= 7; i++) {
+                const d = new Date(base);
+                d.setDate(base.getDate() - i);
+                const dateStr = toLocalDateString(d);
+                const hourData = hourlyMetrics?.[dateStr]?.[heatmapStore]?.[String(hour)];
+                if (hourData && typeof hourData.customers === 'number') {
+                    sum += hourData.customers;
+                    count++;
+                }
+            }
+            result[hour] = count > 0 ? Math.round(sum / count) : null;
+        }
+        return result;
+    }, [hourlyMetrics, heatmapStore]);
+
     const handleHeatmapClick = (hour, laneId) => {
         setHeatmapModal({
             isOpen: true,
             data: { hour, laneId, storeId: heatmapStore, startDate, endDate,
-                    avgCustomers: heatmapData[hour]?.customers || 0 }
+                    avgCustomers: weeklyGuideCustomers[hour] || 0 }
         });
     };
     
@@ -912,7 +933,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                             <h4 className="text-center font-bold mb-2">客数</h4>
                             <div className="space-y-1">
                                 {timeLine.map(hour => {
-                                    const guide = calcRegisterGuide(heatmapData[hour]?.customers);
+                                    const guide = calcRegisterGuide(weeklyGuideCustomers[hour]);
                                     return (
                                         <div key={`cust-${hour}`} className="w-full p-2 rounded-md text-sm bg-gray-700/50 min-h-[52px]">
                                             <div className="flex justify-between items-center">
@@ -921,7 +942,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                                             </div>
                                             {guide && (
                                                 <div className="text-right text-xs text-amber-300 mt-0.5">
-                                                    レジ対応目安 合計{guide}分
+                                                    レジ対応目安 合計{guide}分（直近1週間）
                                                 </div>
                                             )}
                                         </div>
