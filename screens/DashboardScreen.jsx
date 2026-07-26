@@ -935,13 +935,13 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                                 {timeLine.map(hour => {
                                     const guide = calcRegisterGuide(weeklyGuideCustomers[hour]);
                                     return (
-                                        <div key={`cust-${hour}`} className="w-full p-2 rounded-md text-sm bg-gray-700/50 min-h-[52px]">
+                                        <div key={`cust-${hour}`} className="w-full px-2 py-1.5 rounded-md text-sm bg-gray-700/50 h-[64px]">
                                             <div className="flex justify-between items-center">
                                                 <span className="font-bold text-gray-200">{String(hour).padStart(2, '0')}:00</span>
                                                 <span className="font-semibold text-white">{(heatmapData[hour]?.customers || 0).toLocaleString()} 人</span>
                                             </div>
                                             {guide && (
-                                                <div className="text-right text-xs text-amber-300 mt-0.5">
+                                                <div className="text-right text-xs text-amber-300 mt-0">
                                                     レジ対応目安 合計{guide}分（直近1週間）
                                                 </div>
                                             )}
@@ -954,7 +954,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                             <h4 className="text-center font-bold mb-2">販売金額</h4>
                             <div className="space-y-1">
                                 {timeLine.map(hour => (
-                                    <div key={`sales-${hour}`} className="w-full p-2 rounded-md text-sm flex justify-between items-center bg-gray-700/50 min-h-[52px]">
+                                    <div key={`sales-${hour}`} className="w-full p-2 rounded-md text-sm flex justify-between items-center bg-gray-700/50 h-[64px]">
                                         <span className="font-bold text-gray-200">{String(hour).padStart(2, '0')}:00</span>
                                         <span className="font-semibold text-white">¥{(heatmapData[hour]?.sales || 0).toLocaleString()}</span>
                                     </div>
@@ -966,7 +966,7 @@ export const DashboardScreen = ({ allAssignments = {}, hourlyMetrics = {}, curre
                                 <h4 className="text-center font-bold mb-2">{lane.name}</h4>
                                 <div className="space-y-1">
                                     {timeLine.map(hour => (
-                                        <button key={`${lane.id}-${hour}`} onClick={() => handleHeatmapClick(hour, lane.id)} className={`w-full p-2 rounded-md text-sm flex justify-between items-center transition-colors duration-300 min-h-[52px] ${getWorkloadColor(heatmapData[hour]?.lanes?.[lane.id] || 0)}`}>
+                                        <button key={`${lane.id}-${hour}`} onClick={() => handleHeatmapClick(hour, lane.id)} className={`w-full p-2 rounded-md text-sm flex justify-between items-center transition-colors duration-300 h-[64px] ${getWorkloadColor(heatmapData[hour]?.lanes?.[lane.id] || 0)}`}>
                                             <span className="font-bold text-gray-200">{String(hour).padStart(2, '0')}:00</span>
                                             <span className="font-semibold text-white">{heatmapData[hour]?.lanes?.[lane.id] || 0} 分</span>
                                         </button>
