@@ -902,6 +902,29 @@ export const TimetableScreen = ({
                                                     />
                                                     <span className="text-xs text-gray-400">円</span>
                                                 </div>
+                                                {(() => {
+                                                    const customers = currentMetrics[hour]?.customers;
+                                                    const sales = currentMetrics[hour]?.sales;
+                                                    const hasBoth = typeof customers === 'number' && typeof sales === 'number' && customers > 0;
+                                                    if (!hasBoth) return null;
+                                                    const spend = Math.round(sales / customers);
+                                                    const belowMinCustomers = customers < HOURLY_SPEND_MIN_CUSTOMERS;
+                                                    const abnormal = isHourlySpendAbnormal(hour, customers, sales);
+                                                    const range = HOURLY_SPEND_RANGE[hour];
+                                                    const className = abnormal
+                                                        ? 'text-xs text-yellow-400'
+                                                        : belowMinCustomers
+                                                            ? 'text-xs text-gray-500'
+                                                            : 'text-xs text-gray-300';
+                                                    return (
+                                                        <p className={className}>
+                                                            {spend.toLocaleString()}円/人
+                                                            {abnormal && (
+                                                                <span title={range ? `この時間帯の通常範囲は ${range[0].toLocaleString()}〜${range[1].toLocaleString()}円です` : ''}> ⚠️</span>
+                                                            )}
+                                                        </p>
+                                                    );
+                                                })()}
                                                 {(weeklyAverages[hour]?.customers !== null || weeklyAverages[hour]?.sales !== null) && (
                                                     <div className="mt-1 pt-1 border-t border-gray-600 text-center">
                                                         <p className="text-[10px] text-gray-400">直近1週間の平均</p>
@@ -911,6 +934,15 @@ export const TimetableScreen = ({
                                                         {weeklyAverages[hour]?.sales !== null && (
                                                             <p className="text-xs text-amber-300">¥{weeklyAverages[hour].sales.toLocaleString()}</p>
                                                         )}
+                                                        {(() => {
+                                                            const customers = weeklyAverages[hour]?.customers;
+                                                            const sales = weeklyAverages[hour]?.sales;
+                                                            const hasBoth = typeof customers === 'number' && typeof sales === 'number' && customers > 0;
+                                                            if (!hasBoth) return null;
+                                                            return (
+                                                                <p className="text-xs text-amber-300">¥{Math.round(sales / customers).toLocaleString()}/人</p>
+                                                            );
+                                                        })()}
                                                     </div>
                                                 )}
                                             </div>
