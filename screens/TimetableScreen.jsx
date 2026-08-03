@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Store, Calendar, PlusCircle, X, User, Clock, FileText, Edit, Copy, Trash2, AlertTriangle, Layers, Save, ArrowLeft, ChevronDown, ChevronRight, Folder, Download, Upload, Sheet, RotateCcw } from 'lucide-react';
-import { APP_VERSION, calcRegisterGuide, BENCHMARK_TASKS, toLocalDateString } from '../lib/utils';
+import { APP_VERSION, calcRegisterGuide, BENCHMARK_TASKS, toLocalDateString, isHourlySpendAbnormal, checkDailySpend, HOURLY_SPEND_RANGE, HOURLY_SPEND_MIN_CUSTOMERS } from '../lib/utils';
 
 /**
  * 客数・販売金額一括入力モーダル
  */
-const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData }) => {
+const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData, storeName }) => {
     const [metricsData, setMetricsData] = useState({});
     const inputRefs = useRef({});
     const saveButtonRef = useRef(null);
@@ -24,6 +24,24 @@ const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData }) => {
         }
     }, [initialData, isOpen]);
 
+    const totals = useMemo(() => {
+        let custSum = 0;
+        let salesSum = 0;
+        Object.values(metricsData).forEach(values => {
+            const customers = values.customers === '' ? null : Number(values.customers);
+            const sales = values.sales === '' ? null : Number(values.sales);
+            if (typeof customers === 'number') custSum += customers;
+            if (typeof sales === 'number') salesSum += sales;
+        });
+        const hasHalfFilled = Object.values(metricsData).some(v =>
+            (v.customers !== '' && v.sales === '') || (v.customers === '' && v.sales !== ''));
+        return {
+            custSum,
+            salesSum,
+            dailyCheck: hasHalfFilled ? null : checkDailySpend(storeName, custSum, salesSum),
+        };
+    }, [metricsData, storeName]);
+
     const handleInputChange = (hour, field, value) => {
         const parsedValue = value === '' ? '' : parseInt(value.replace(/,/g, ''), 10);
          if (value !== '' && isNaN(parsedValue)) return;
@@ -39,9 +57,14 @@ const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData }) => {
 
     const handleSaveClick = () => {
         const cleanedData = {};
+        let custSum = 0;
+        let salesSum = 0;
         Object.entries(metricsData).forEach(([hour, values]) => {
             const customers = values.customers === '' ? null : Number(values.customers);
             const sales = values.sales === '' ? null : Number(values.sales);
+
+            if (typeof customers === 'number') custSum += customers;
+            if (typeof sales === 'number') salesSum += sales;
 
             if (customers !== null || sales !== null) {
                 cleanedData[hour] = {};
@@ -49,6 +72,20 @@ const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData }) => {
                 if (sales !== null) cleanedData[hour].sales = sales;
             }
         });
+
+        const result = checkDailySpend(storeName, custSum, salesSum);
+        if (result && result.abnormal) {
+            const ok = window.confirm(
+                `1日の客単価が通常の範囲から外れています。\n\n` +
+                `客単価：${result.spend.toLocaleString()}円\n` +
+                `この店舗の通常範囲：${result.range[0].toLocaleString()}〜${result.range[1].toLocaleString()}円\n\n` +
+                `売上と客数が入れ替わっていないかご確認ください。\n` +
+                `クリスマスや大晦日など、実際に客単価が上がる日もあります。\n` +
+                `問題なければ「OK」で保存します。`
+            );
+            if (!ok) return;
+        }
+
         onSave(cleanedData);
     };
 
@@ -75,7 +112,7 @@ const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData }) => {
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-70 flex justify-center items-center z-[60] p-4">
-            <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-md max-h-[80vh] flex flex-col">
+            <div className="bg-gray-800 rounded-lg shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col">
                 <div className="p-4 border-b border-gray-700 flex justify-between items-center">
                     <h3 className="text-lg font-bold text-cyan-400">客数・売上 一括入力</h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-white"><X size={24} /></button>
@@ -87,11 +124,21 @@ const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData }) => {
                                 <th className="p-2 text-left">時間</th>
                                 <th className="p-2 text-right">客数 (人)</th>
                                 <th className="p-2 text-right">販売金額 (円)</th>
+                                <th className="p-2 text-right">客単価</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {Array.from({ length: 24 }, (_, i) => i).map(hour => (
-                                <tr key={hour} className="border-b border-gray-700 hover:bg-gray-700/50">
+                            {Array.from({ length: 24 }, (_, i) => i).map(hour => {
+                                const customers = metricsData[hour]?.customers === '' ? null : Number(metricsData[hour]?.customers);
+                                const sales = metricsData[hour]?.sales === '' ? null : Number(metricsData[hour]?.sales);
+                                const hasBoth = typeof customers === 'number' && typeof sales === 'number' && customers > 0;
+                                const spend = hasBoth ? Math.round(sales / customers) : null;
+                                const belowMinCustomers = typeof customers === 'number' && customers < HOURLY_SPEND_MIN_CUSTOMERS;
+                                const abnormal = hasBoth && isHourlySpendAbnormal(hour, customers, sales);
+                                const range = HOURLY_SPEND_RANGE[hour];
+
+                                return (
+                                <tr key={hour} className={`border-b border-gray-700 hover:bg-gray-700/50 ${abnormal ? 'bg-yellow-900/30' : ''}`}>
                                     <td className="p-2 font-semibold">{`${String(hour).padStart(2, '0')}:00`}</td>
                                     <td>
                                         <input
@@ -115,8 +162,32 @@ const MetricsBulkInputModal = ({ isOpen, onClose, onSave, initialData }) => {
                                             onKeyDown={e => handleKeyDown(e, hour, 'sales')}
                                         />
                                     </td>
+                                    <td className={`p-2 text-right text-sm ${abnormal ? 'text-yellow-400' : belowMinCustomers && hasBoth ? 'text-gray-500 text-xs' : ''}`}>
+                                        {hasBoth ? (
+                                            <>
+                                                {spend.toLocaleString()}円
+                                                {abnormal && (
+                                                    <span
+                                                        className="ml-1"
+                                                        title={range ? `この時間帯の通常範囲は ${range[0].toLocaleString()}〜${range[1].toLocaleString()}円です` : ''}
+                                                    >
+                                                        ⚠️
+                                                    </span>
+                                                )}
+                                            </>
+                                        ) : null}
+                                    </td>
                                 </tr>
-                            ))}
+                                );
+                            })}
+                            <tr className={`border-t-2 border-gray-600 font-bold ${totals.dailyCheck?.abnormal ? 'bg-yellow-900/30 text-yellow-400' : ''}`}>
+                                <td className="p-2">合計</td>
+                                <td className="p-2 text-right">{totals.custSum.toLocaleString()}人</td>
+                                <td className="p-2 text-right">{totals.salesSum.toLocaleString()}円</td>
+                                <td className="p-2 text-right">
+                                    {totals.dailyCheck ? `${totals.dailyCheck.spend.toLocaleString()}円` : ''}
+                                </td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -742,6 +813,7 @@ export const TimetableScreen = ({
                 onClose={() => setIsMetricsModalOpen(false)}
                 onSave={handleMetricsBulkSave}
                 initialData={currentMetrics}
+                storeName={masterData.stores.find(s => s.id === currentUser.storeId)?.name || ''}
             />
             <div className="max-w-screen-2xl mx-auto p-2 sm:p-4">
                  <header className="mb-6 p-4 bg-gray-800 rounded-lg shadow-lg">
