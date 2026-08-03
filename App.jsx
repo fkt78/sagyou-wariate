@@ -3,7 +3,7 @@ import { doc, setDoc, onSnapshot, updateDoc, collection, getDocs, writeBatch, ge
 import { signInAnonymously, onAuthStateChanged, signOut } from 'firebase/auth';
 import { ArrowLeft, Loader, Check, Download, Upload, RefreshCw } from 'lucide-react';
 import { app, auth, db } from './lib/firebase';
-import { APP_VERSION, APP_BUILD_DATE, toLocalDateString } from './lib/utils';
+import { APP_VERSION, toLocalDateString } from './lib/utils';
 import { AlertModal, LoadingSpinner } from './components/common';
 import { DashboardScreen } from './screens/DashboardScreen';
 import { LoginScreen } from './screens/LoginScreen';

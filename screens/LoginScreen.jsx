@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LogIn, Loader, ChevronDown } from 'lucide-react';
-import { APP_VERSION, APP_BUILD_DATE } from '../lib/utils';
+import { APP_VERSION, BUILD_TIME, formatBuildTime } from '../lib/utils';
 import { AlertModal } from '../components/common';
 
 /**
@@ -69,7 +69,7 @@ export const LoginScreen = ({ onLogin, masterData }) => {
                             </button>
                         </div>
                     </form>
-                    <p className="text-center text-gray-500 text-xs mt-4">v{APP_VERSION} ({APP_BUILD_DATE})</p>
+                    <p className="text-center text-gray-500 text-xs mt-4">v{APP_VERSION} ({formatBuildTime(BUILD_TIME)})</p>
                 </div>
             </div>
         </>

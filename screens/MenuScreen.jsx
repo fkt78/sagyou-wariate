@@ -1,6 +1,6 @@
 import React from 'react';
 import { LogIn, FileText, LayoutDashboard } from 'lucide-react';
-import { APP_VERSION, APP_BUILD_DATE } from '../lib/utils';
+import { APP_VERSION, BUILD_TIME, formatBuildTime } from '../lib/utils';
 
 /**
  * メニュー画面コンポーネント
@@ -23,7 +23,7 @@ export const MenuScreen = ({ currentUser, onNavigate, onLogout, masterData }) =>
                     <span className="text-2xl font-semibold">ダッシュボード</span>
                 </button>
             </div>
-            <p className="text-gray-600 text-xs mt-8">v{APP_VERSION} ({APP_BUILD_DATE})</p>
+            <p className="text-gray-600 text-xs mt-8">v{APP_VERSION} ({formatBuildTime(BUILD_TIME)})</p>
         </div>
     </div>
 );
