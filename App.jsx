@@ -428,14 +428,15 @@ export default function App() {
             const currentStoreName = masterData.stores.find(s => s.id === currentUser.storeId)?.name;
 
             const assignmentOps = [];
-            dirtyAssignmentDates.forEach(date => {
+            const mergedTasksByDate = {}; // 保存成功後にローカルstateへ反映するため保持
+            for (const date of dirtyAssignmentDates) {
                 const dayTasks = safeAssignments[date];
-                if (!Array.isArray(dayTasks)) return;
-                const tasksForCurrentUserStore = dayTasks
+                if (!Array.isArray(dayTasks)) continue;
+                const localTasks = dayTasks
                   .filter(t => t.storeId === currentUser.storeId || (currentStoreName && t.storeId === currentStoreName))
                   .map(({ storeId, ...task }) => {
                     const taskToSave = { ...task };
-                    
+
                     Object.keys(taskToSave).forEach(key => {
                         if (taskToSave[key] === undefined) {
                             delete taskToSave[key];
@@ -449,23 +450,64 @@ export default function App() {
                     }
                     return taskToSave;
                   });
-                
+
+                // --- マージ保存: 書き込み直前にDBの最新を読み、他端末の入力を消さない ---
+                // 丸ごと上書きによる入力消失事故（2026-08-09 北谷店の深夜0〜8時分が消えた）の再発防止。
+                // 既知のトレードオフ: 入力済みタスクの削除・リセットは、他端末の保存タイミングに
+                // よっては復活することがある（データ消失より復活の方が軽い事故のため許容）。
                 const docRef = doc(db, 'assignments', `${currentUser.storeId}_${date}`);
-                if (tasksForCurrentUserStore.length > 0) {
-                    assignmentOps.push({ docRef, data: { tasks: tasksForCurrentUserStore } });
+                let remoteTasks = [];
+                try {
+                    const remoteSnap = await getDoc(docRef);
+                    if (remoteSnap.exists()) remoteTasks = remoteSnap.data().tasks || [];
+                } catch (e) {
+                    console.error('Merge read failed (assignments):', e);
+                    // 読めない場合は従来どおりローカルのみで保存（保存不能よりまし）
                 }
-            });
-            
+
+                const localById = new Map(localTasks.map(t => [t.id, t]));
+                const hasValue = (v) => v !== undefined && v !== null && v !== '';
+                const merged = localTasks.map(lt => {
+                    const rt = remoteTasks.find(r => r.id === lt.id);
+                    if (!rt) return lt;
+                    const out = { ...lt };
+                    // ローカルが空でリモートに値があるフィールドはリモートを残す
+                    if (!hasValue(lt.worker) && hasValue(rt.worker)) out.worker = rt.worker;
+                    if (!hasValue(lt.duration) && hasValue(rt.duration)) out.duration = rt.duration;
+                    return out;
+                });
+                // リモートにだけ存在し、入力（worker/duration）があるタスクは残して保護
+                remoteTasks.forEach(rt => {
+                    if (!localById.has(rt.id) && (hasValue(rt.worker) || hasValue(rt.duration))) {
+                        merged.push(rt);
+                    }
+                });
+
+                mergedTasksByDate[date] = merged;
+                if (merged.length > 0) {
+                    assignmentOps.push({ docRef, data: { tasks: merged } });
+                }
+            }
+
             const metricsOps = [];
-            dirtyMetricsDates.forEach(date => {
+            for (const date of dirtyMetricsDates) {
                 const storeData = (hourlyMetrics || {})[date];
-                if (!storeData) return;
+                if (!storeData) continue;
                 const metricsData = storeData[currentUser.storeId] || (currentStoreName && storeData[currentStoreName]);
-                if (metricsData) {
-                    const docRef = doc(db, 'hourly_metrics', `${currentUser.storeId}_${date}`);
-                    metricsOps.push({ docRef, data: { hourlyData: metricsData } });
+                if (!metricsData) continue;
+
+                // 時間帯単位でマージ（ローカルにある時間帯はローカル優先、無い時間帯はリモートを残す）
+                const docRef = doc(db, 'hourly_metrics', `${currentUser.storeId}_${date}`);
+                let remoteHourly = {};
+                try {
+                    const remoteSnap = await getDoc(docRef);
+                    if (remoteSnap.exists()) remoteHourly = remoteSnap.data().hourlyData || {};
+                } catch (e) {
+                    console.error('Merge read failed (metrics):', e);
                 }
-            });
+                const mergedHourly = { ...remoteHourly, ...metricsData };
+                metricsOps.push({ docRef, data: { hourlyData: mergedHourly } });
+            }
             
             const allOps = [...assignmentOps, ...metricsOps];
             if (isTemplatesDirty && templatesLoadedRef.current) {
@@ -490,6 +532,15 @@ export default function App() {
                 await batch.commit();
             }
             
+            // マージで取り込んだ他端末の入力をこの端末の表示にも反映する
+            Object.entries(mergedTasksByDate).forEach(([date, merged]) => {
+                setAssignmentsWithRef(prev => {
+                    const others = (prev[date] || []).filter(t => t.storeId !== currentUser.storeId);
+                    const mine = merged.map(t => ({ ...t, storeId: currentUser.storeId, isFromTemplate: t.isFromTemplate !== undefined ? t.isFromTemplate : true }));
+                    return { ...prev, [date]: [...others, ...mine] };
+                });
+            });
+
             // 保存成功 → dirty フラグをクリア
             dirtyAssignmentDatesRef.current = new Set();
             dirtyMetricsDatesRef.current = new Set();
