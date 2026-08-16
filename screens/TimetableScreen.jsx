@@ -1006,6 +1006,10 @@ export const TimetableScreen = ({
                                                                         <User size={14} className="text-gray-500 ml-1 shrink-0"/>
                                                                         <select value={assignment.worker || ''} onChange={(e) => handleDataChange(assignment.id, 'worker', e.target.value)} className="bg-transparent text-white p-1 w-full text-xs focus:outline-none appearance-none">
                                                                             <option value="" disabled className="bg-gray-900 text-gray-400">担当者...</option>
+                                                                            {/* 退職者はリストから除外されるが、過去タスクに記録済みの名前は表示を守るため補完する */}
+                                                                            {assignment.worker && !masterData.staff.includes(assignment.worker) && (
+                                                                                <option value={assignment.worker} className="bg-gray-800 text-gray-400">{assignment.worker}（退職済）</option>
+                                                                            )}
                                                                             {masterData.staff.map(name => (<option key={name} value={name} className="bg-gray-800 text-white">{name}</option>))}
                                                                         </select>
                                                                     </div>

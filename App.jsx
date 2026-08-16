@@ -132,8 +132,14 @@ export default function App() {
             workItemsList.sort((a, b) => a.name.localeCompare(b.name, 'ja'));
 
             const employeeDataList = [];
+            const todayStr = toLocalDateString();
             employeesSnapshot.docs.forEach(doc => {
                 const employee = doc.data();
+                // 退職済み（retirementDate が今日以前）のスタッフはドロップダウンに出さない
+                // （未来の退職日が登録されている人は退職日まで表示される。過去タスクの表示は
+                //   TimetableScreen 側で担当者名を選択肢に補完して守る）
+                const retirement = typeof employee.retirementDate === 'string' ? employee.retirementDate.trim() : '';
+                if (retirement && /^\d{4}-\d{2}-\d{2}$/.test(retirement) && retirement <= todayStr) return;
                 let displayName = employee.nickname?.trim() || `${employee.lastName?.trim() || ''} ${employee.firstName?.trim() || ''}`.trim();
                 if (displayName) employeeDataList.push({ displayName, role: employee.role || 'その他' });
             });
