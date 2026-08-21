@@ -53,6 +53,11 @@ export default function App() {
     };
 
     // 変更された日付とデータ種別を追跡（保存時に変更分のみ送信するため）
+    // 読み込み時点のDBの内容（3方向マージの「基準」）
+    // 基準にあったのに今ローカルに無い = この端末で削除した → 復活させない
+    // 基準に無かったのにDBにある     = 他端末が追加・入力した → 守る
+    const baseTasksRef = useRef({});   // { 'YYYY-MM-DD': Map<taskId, {worker, duration}> }
+    const baseMetricHoursRef = useRef({}); // { 'YYYY-MM-DD': Set<'0'..'23'> }
     const dirtyAssignmentDatesRef = useRef(new Set());
     const dirtyMetricsDatesRef = useRef(new Set());
     const dirtyTemplatesRef = useRef(false);
@@ -211,6 +216,19 @@ export default function App() {
                 allMetrics[date][storeId] = doc.data().hourlyData || {};
             });
 
+            // 読み込んだ内容を3方向マージの基準として記録
+            const baseTasks = {}, baseHours = {};
+            Object.entries(allAssignments).forEach(([date, tasks]) => {
+                baseTasks[date] = new Map(tasks.map(t => [t.id, { worker: t.worker, duration: t.duration }]));
+            });
+            Object.entries(allMetrics).forEach(([date, byStore]) => {
+                const hours = new Set();
+                Object.values(byStore).forEach(h => Object.keys(h || {}).forEach(k => hours.add(k)));
+                baseHours[date] = hours;
+            });
+            baseTasksRef.current = baseTasks;
+            baseMetricHoursRef.current = baseHours;
+
             setAssignmentsWithRef(allAssignments);
             setHourlyMetrics(allMetrics);
             setMasterData({ stores: storesList, staff: sortedUniqueStaffNames, workItems: workItemsList });
@@ -282,6 +300,18 @@ export default function App() {
                 const storeId = normalizeStoreId(storeIdFromDoc);
                 if (!olderMetrics[date]) olderMetrics[date] = {};
                 olderMetrics[date][storeId] = doc.data().hourlyData || {};
+            });
+
+            // 追い読みした分も基準に加える（既に基準がある日付は上書きしない）
+            Object.entries(olderAssignments).forEach(([date, tasks]) => {
+                if (!baseTasksRef.current[date]) baseTasksRef.current[date] = new Map(tasks.map(t => [t.id, { worker: t.worker, duration: t.duration }]));
+            });
+            Object.entries(olderMetrics).forEach(([date, byStore]) => {
+                if (!baseMetricHoursRef.current[date]) {
+                    const hours = new Set();
+                    Object.values(byStore).forEach(h => Object.keys(h || {}).forEach(k => hours.add(k)));
+                    baseMetricHoursRef.current[date] = hours;
+                }
             });
 
             setAssignmentsWithRef(prev => ({ ...olderAssignments, ...prev }));
@@ -457,10 +487,13 @@ export default function App() {
                     return taskToSave;
                   });
 
-                // --- マージ保存: 書き込み直前にDBの最新を読み、他端末の入力を消さない ---
+                // --- 3方向マージ保存: 書き込み直前にDBの最新を読み、他端末の入力を消さない ---
                 // 丸ごと上書きによる入力消失事故（2026-08-09 北谷店の深夜0〜8時分が消えた）の再発防止。
-                // 既知のトレードオフ: 入力済みタスクの削除・リセットは、他端末の保存タイミングに
-                // よっては復活することがある（データ消失より復活の方が軽い事故のため許容）。
+                // 「読み込み時点の基準(baseTasksRef)」と突き合わせて、DBにあってローカルに無い
+                // タスクの正体を判別する:
+                //   基準にあった  → この端末で削除した        → 復活させない
+                //   基準に無かった → 他端末が追加・入力した   → 守る
+                // （基準が無い日付は判別不能のため、安全側に倒してDB側を守る）
                 const docRef = doc(db, 'assignments', `${currentUser.storeId}_${date}`);
                 let remoteTasks = [];
                 try {
@@ -473,20 +506,31 @@ export default function App() {
 
                 const localById = new Map(localTasks.map(t => [t.id, t]));
                 const hasValue = (v) => v !== undefined && v !== null && v !== '';
+                const baseMap = baseTasksRef.current[date];
+                // ローカルが空欄のとき、それが「この端末でのリセット」か「他端末の入力」かを
+                // 基準の値と突き合わせて判別する。基準からDB側が変わっていれば他端末の入力。
+                const changedByOther = (id, field, remoteVal) => {
+                    if (!hasValue(remoteVal)) return false;
+                    if (!baseMap) return true;                 // 基準不明 → 安全側（DBを守る）
+                    if (!baseMap.has(id)) return true;         // 基準に無い → 他端末が作った
+                    const baseVal = baseMap.get(id)[field];
+                    return String(baseVal ?? '') !== String(remoteVal ?? '');
+                };
                 const merged = localTasks.map(lt => {
                     const rt = remoteTasks.find(r => r.id === lt.id);
                     if (!rt) return lt;
                     const out = { ...lt };
-                    // ローカルが空でリモートに値があるフィールドはリモートを残す
-                    if (!hasValue(lt.worker) && hasValue(rt.worker)) out.worker = rt.worker;
-                    if (!hasValue(lt.duration) && hasValue(rt.duration)) out.duration = rt.duration;
+                    // ローカルが空欄でも、DB側が基準から変わっていなければ「この端末で消した」
+                    // とみなして空欄のままにする（↺リセットが効くようにするため）
+                    if (!hasValue(lt.worker) && changedByOther(lt.id, 'worker', rt.worker)) out.worker = rt.worker;
+                    if (!hasValue(lt.duration) && changedByOther(lt.id, 'duration', rt.duration)) out.duration = rt.duration;
                     return out;
                 });
-                // リモートにだけ存在し、入力（worker/duration）があるタスクは残して保護
+                // リモートにだけ存在するタスクの扱いを、基準と照らして決める
                 remoteTasks.forEach(rt => {
-                    if (!localById.has(rt.id) && (hasValue(rt.worker) || hasValue(rt.duration))) {
-                        merged.push(rt);
-                    }
+                    if (localById.has(rt.id)) return;
+                    if (baseMap && baseMap.has(rt.id)) return; // この端末で削除した → 復活させない
+                    if (hasValue(rt.worker) || hasValue(rt.duration)) merged.push(rt); // 他端末の入力 → 守る
                 });
 
                 mergedTasksByDate[date] = merged;
@@ -502,7 +546,8 @@ export default function App() {
                 const metricsData = storeData[currentUser.storeId] || (currentStoreName && storeData[currentStoreName]);
                 if (!metricsData) continue;
 
-                // 時間帯単位でマージ（ローカルにある時間帯はローカル優先、無い時間帯はリモートを残す）
+                // 時間帯単位で3方向マージ（ローカル優先。ローカルに無い時間帯は、基準にあれば
+                // この端末で消した扱いで削除、基準に無ければ他端末の入力として残す）
                 const docRef = doc(db, 'hourly_metrics', `${currentUser.storeId}_${date}`);
                 let remoteHourly = {};
                 try {
@@ -511,7 +556,14 @@ export default function App() {
                 } catch (e) {
                     console.error('Merge read failed (metrics):', e);
                 }
-                const mergedHourly = { ...remoteHourly, ...metricsData };
+                const baseHours = baseMetricHoursRef.current[date];
+                const keptRemoteHourly = {};
+                Object.entries(remoteHourly).forEach(([hourKey, value]) => {
+                    if (metricsData[hourKey] !== undefined) return;      // ローカル側で扱う
+                    if (baseHours && baseHours.has(hourKey)) return;     // この端末で消した → 復活させない
+                    keptRemoteHourly[hourKey] = value;                   // 他端末の入力 → 守る
+                });
+                const mergedHourly = { ...keptRemoteHourly, ...metricsData };
                 metricsOps.push({ docRef, data: { hourlyData: mergedHourly } });
             }
             
@@ -538,6 +590,15 @@ export default function App() {
                 await batch.commit();
             }
             
+            // 保存した内容を次回の基準として更新する（これ以降の削除を正しく判別するため）
+            Object.entries(mergedTasksByDate).forEach(([date, merged]) => {
+                baseTasksRef.current[date] = new Map(merged.map(t => [t.id, { worker: t.worker, duration: t.duration }]));
+            });
+            metricsOps.forEach(({ docRef, data }) => {
+                const date = docRef.id.split('_').pop();
+                baseMetricHoursRef.current[date] = new Set(Object.keys(data.hourlyData || {}));
+            });
+
             // マージで取り込んだ他端末の入力をこの端末の表示にも反映する
             Object.entries(mergedTasksByDate).forEach(([date, merged]) => {
                 setAssignmentsWithRef(prev => {
